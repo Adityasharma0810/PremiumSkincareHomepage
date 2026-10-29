@@ -1,0 +1,10 @@
+{
+  "description": "Shop premium skincare for Indian customers, explore curated routines and bestselling formulas, and discover ingredient benefits, reviews, and exclusive offers.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
