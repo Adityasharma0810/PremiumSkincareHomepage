@@ -3,6 +3,10 @@ type IconProps = {
   name: IconName
   size?: number
 }
+
+export type { UIProduct } from '@/lib/product-adapter'
+export { adaptProduct, adaptProducts } from '@/lib/product-adapter'
+
 export function Icon({ name, size = 22 }: IconProps) {
   const paths: Record<IconName, React.ReactNode> = {
     search: (
@@ -82,69 +86,6 @@ export function Icon({ name, size = 22 }: IconProps) {
     </svg>
   )
 }
-export const products = [
-  {
-    id: 1,
-    name: "Vitamin C Glow Serum",
-    type: "BRIGHTEN + REVIVE",
-    price: 699,
-    old: 899,
-    color: "amber",
-    kind: "serum",
-    badge: "Bestseller",
-  },
-  {
-    id: 2,
-    name: "Barrier Repair Moisturiser",
-    type: "NOURISH + STRENGTHEN",
-    price: 599,
-    old: 749,
-    color: "sage",
-    kind: "jar",
-    badge: "",
-  },
-  {
-    id: 3,
-    name: "Gentle Daily Cleanser",
-    type: "CLEANSE + REFRESH",
-    price: 399,
-    old: 499,
-    color: "cream",
-    kind: "pump",
-    badge: "",
-  },
-  {
-    id: 4,
-    name: "Dewy Sunscreen SPF 50",
-    type: "PROTECT + GLOW",
-    price: 549,
-    old: 699,
-    color: "peach",
-    kind: "tube",
-    badge: "New",
-  },
-  {
-    id: 5,
-    name: "Hydra Boost Serum",
-    type: "PLUMP + HYDRATE",
-    price: 649,
-    old: 799,
-    color: "blue",
-    kind: "serum",
-    badge: "",
-  },
-  {
-    id: 6,
-    name: "Overnight Renewal Cream",
-    type: "REST + RESTORE",
-    price: 749,
-    old: 949,
-    color: "sage",
-    kind: "jar",
-    badge: "",
-  },
-]
-export type Product = typeof products[number]
 export function Bottle({
   color = "amber",
   kind = "serum",
@@ -160,7 +101,7 @@ export function Bottle({
     <div
       className={`bottle ${kind} ${color} ${large ? "large" : ""}`}
       role="img"
-      aria-label={`${label} aura skincare bottle`}
+      aria-label={`${label} derma aura skincare bottle`}
     >
       <div className="bottle-top">
         <div className="dropper-bulb" />
@@ -170,7 +111,7 @@ export function Bottle({
       <div className="bottle-body">
         <div className="bottle-label">
           <span className="bottle-brand">
-            aura<span>®</span>
+            derma aura<span>®</span>
           </span>
           <span className="bottle-rule" />
           <strong>{label}</strong>

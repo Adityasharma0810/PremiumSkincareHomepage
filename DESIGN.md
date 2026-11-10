@@ -1,6 +1,6 @@
-# aura — skincare homepage concept
+# derma aura — skincare homepage concept
 
-“aura” is a replaceable brand identity for the supplied [BRAND NAME] placeholder.
+“derma aura” is the brand identity for this responsive skincare storefront.
 This deliverable is a responsive React prototype, not a native Figma file.
 
 ## Responsive layouts
@@ -13,7 +13,7 @@ This deliverable is a responsive React prototype, not a native Figma file.
 
 | Token | Value |
 | --- | --- |
-| Beige | #B59F85 |
+| Beige | #F5EBDD |
 | Cream | #F5EDE0 |
 | Ivory | #FFF9F0 |
 | Deep brown | #2E2620 |
@@ -60,11 +60,16 @@ Deep brown is used for text on beige where the specified ivory/beige pairing wou
 - Product search, category filters, add-to-bag, quantity adjustment and subtotal calculations work in memory.
 - Routine combo adds three essentials; SPF and serum calls to action add their corresponding product.
 - Offer countdown is illustrative and resets on page reload.
-- Account, checkout, newsletter, support, social and chat surfaces are concept interactions.
+- Account, newsletter, support, social and chat surfaces are concept interactions.
+- Checkout uses Razorpay Checkout; test or live behavior depends on the
+  server-configured key pair. Payment orders and signature verification run in
+  the `razorpay` Supabase Edge Function.
 - Newsletter provides a welcome-code confirmation without storing or sending an email.
 - WhatsApp-styled help opens in-app guidance; no brand phone number was supplied.
 - Prices, reviews, efficacy claims and promotional copy are illustrative.
-- No backend, payment processing, account authentication or durable data storage is connected.
+- Product, cart, authentication and order data are backed by Supabase. Payment
+  processing requires deploying the Edge Function and configuring server-only
+  Razorpay credentials.
 
 ## Store pages and demo account flow
 
@@ -79,6 +84,29 @@ Deep brown is used for text on beige where the specified ivory/beige pairing wou
 - Demo sign-in accepts sample details and does not verify credentials, save
   passwords, create real accounts or send network requests.
 - The demo user is held only in React memory and is cleared by refresh/sign-out.
-- Signed-in checkout opens an explicit preview notice; no orders or payments occur.
+- Signed-in checkout creates a server-priced pending order, opens Razorpay, and
+  marks the order paid only after server-side signature and capture verification.
+- The My orders page lists the signed-in customer’s eligible orders, including
+  paid orders awaiting delivery, delivered orders, and cash-on-delivery orders.
+  COD orders remain payment-pending until cash collection is recorded.
+- Checkout collects a delivery address and stores it in the existing `addresses`
+  and `orders.shipping_address_snapshot` fields. A successful payment creates a
+  DTDC shipment record. Once the DTDC API key, customer code, sender address,
+  hub, service, route-node, and package configuration are set as Edge Function
+  secrets, the function automatically books the shipment; until then it remains pending.
+  Package measurements are the fully packed outer dimensions and weight.
+  Customers can request tracking for booked shipments from My orders.
+- `supabase/functions/.env.example` lists local server-side Razorpay and DTDC
+  placeholders. Never put these credentials in the Vite `.env`; configure deployed
+  Edge Function secrets in Supabase.
+- Deploy `supabase/functions/razorpay` to the linked Supabase project and set
+  `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in Supabase Edge Function secrets.
+  Use the Razorpay test-mode key pair for simulated payments, or live-mode keys
+  to accept real charges. Never expose the key secret to the browser. Deploy
+  function changes with `supabase functions deploy razorpay`.
+  The function verifies the Supabase access token itself, so its gateway JWT
+  verification is disabled in `supabase/config.toml`. COD orders are created
+  as confirmed with pending payment and request cash collection on delivery.
+  DTDC booking requests carry the full order total as the COD amount.
 - The account icon and mobile navigation open the sign-in/account page.
 - Backend authentication and server-enforced checkout authorization remain deferred.

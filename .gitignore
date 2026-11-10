@@ -3,6 +3,9 @@ dist/
 build/
 .cache/
 .env*
+
+# Allow the example env file to be tracked (it contains no real secrets).
+!.env.example
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo
