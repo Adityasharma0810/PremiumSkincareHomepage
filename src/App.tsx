@@ -455,7 +455,10 @@ export default function App() {
                     <Icon name={menu ? "close" : "menu"} />
                   </button>
                   <a className="logo" href="#/" aria-label="derma aura home">
-                    <img src="/derma-aura-nav-logo.png" alt="" />
+                    <img
+                      src="https://i.pinimg.com/736x/90/21/62/902162d122a8865e264c661495dfa3b0.jpg"
+                      alt=""
+                    />
                   </a>
                   <nav
                     className={menu ? "links open" : "links"}
