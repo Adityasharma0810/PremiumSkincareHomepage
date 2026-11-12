@@ -94,6 +94,7 @@ export default function App() {
   const [expandedProducts, setExpandedProducts] = useState<string[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const serumRef = useRef<HTMLElement>(null)
+  const catalogueRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
 
@@ -354,6 +355,14 @@ export default function App() {
     if (route !== "home") navigate("concerns")
     else document.getElementById("shop")?.scrollIntoView({ behavior: "smooth" })
   }
+  function scrollCatalogue(direction: -1 | 1) {
+    const catalogue = catalogueRef.current
+    if (!catalogue) return
+    catalogue.scrollBy({
+      left: direction * catalogue.clientWidth * 0.8,
+      behavior: "smooth",
+    })
+  }
   async function handleChangeQuantity(itemId: string, quantity: number) {
     await setQuantity(itemId, quantity)
   }
@@ -455,19 +464,8 @@ export default function App() {
   }
   return (
     <>
-      {dataLoading && (
-            <div className="announcement">
-              Loading your essentials…
-            </div>
-          )}
-          {!dataLoading && (
+      {!dataLoading && (
             <>
-              <div className="announcement">
-                A little care, on us. <span>Complimentary shipping on every order</span>
-                <i />
-                Use code <strong>GLOW10</strong>
-                <Icon name="arrow" size={13} />
-              </div>
               <header className={`nav ${scrolled ? "scrolled" : ""}`}>
                 <div className="nav-inner">
                   <button
@@ -585,15 +583,33 @@ export default function App() {
                           Our <em>catalogue.</em>
                         </h1>
                       </div>
-                      <button
-                        className="text-link"
-                        onClick={() => {
-                          setQuery("")
-                          setPanel("search")
-                        }}
-                      >
-                        Browse all products <Icon name="arrow" size={18} />
-                      </button>
+                      <div className="catalogue-actions">
+                        <button
+                          className="catalogue-scroll-button scroll-left"
+                          type="button"
+                          aria-label="Scroll products left"
+                          onClick={() => scrollCatalogue(-1)}
+                        >
+                          <Icon name="arrow" size={18} />
+                        </button>
+                        <button
+                          className="catalogue-scroll-button scroll-right"
+                          type="button"
+                          aria-label="Scroll products right"
+                          onClick={() => scrollCatalogue(1)}
+                        >
+                          <Icon name="arrow" size={18} />
+                        </button>
+                        <button
+                          className="text-link"
+                          onClick={() => {
+                            setQuery("")
+                            setPanel("search")
+                          }}
+                        >
+                          Browse all products <Icon name="arrow" size={18} />
+                        </button>
+                      </div>
                     </div>
                     {productLoadError ? (
                       <p className="catalogue-message" role="alert">
@@ -605,23 +621,20 @@ export default function App() {
                       </p>
                     ) : (
                       <div
-                        className="marquee product-marquee catalogue-marquee"
-                        title="Products move from left to right; pauses on hover"
-                        aria-label="All skincare products, moving from left to right"
+                        className="catalogue-viewport"
+                        ref={catalogueRef}
+                        role="region"
+                        aria-label="Skincare product catalogue"
+                        tabIndex={0}
                       >
-                        <div className="marquee-track">
-                          <div className="product-group">
-                            {catalogueProducts.map((p) => productCard(p))}
-                          </div>
-                          <div className="duplicate-group" aria-hidden="true">
-                            {catalogueProducts.map((p) => productCard(p, true))}
-                          </div>
+                        <div className="catalogue-track">
+                          {catalogueProducts.map((p) => productCard(p))}
                         </div>
                       </div>
                     )}
                     <div className="marquee-caption">
                       <span className="moving-dot" /> Explore every product in the collection.
-                      <span className="swipe-note">Swipe to explore</span>
+                      <span className="swipe-note">Swipe or use arrows to explore</span>
                     </div>
                     <div className="trust-strip">
                       <span>
