@@ -1,7 +1,7 @@
 /**
  * Auth context.
  *
- * Provides the signed-in user (from Supabase Auth + profiles) and auth actions
+ * Provides the signed-in user from Supabase Auth and auth actions
  * to the whole app. Consume with `useAuth()`.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
@@ -9,8 +9,8 @@ import {
   getCurrentUser,
   onAuthStateChange,
   signIn,
-  signOut,
   signUp,
+  signOut,
   type AuthUser,
 } from '@/services/auth'
 
@@ -18,7 +18,7 @@ const AuthContext = createContext<{
   user: AuthUser | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string, fullName?: string) => Promise<void>
+  signUp: (email: string, password: string) => Promise<boolean>
   signOut: () => Promise<void>
 } | null>(null)
 
@@ -50,12 +50,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signIn({ email, password })
   }
 
-  const handleSignUp = async (
-    email: string,
-    password: string,
-    fullName?: string,
-  ) => {
-    await signUp({ email, password, fullName })
+  const handleSignUp = async (email: string, password: string) => {
+    const data = await signUp({ email, password })
+    return data.session !== null
   }
 
   const handleSignOut = async () => {

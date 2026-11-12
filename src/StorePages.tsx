@@ -4,21 +4,39 @@ import {
   getProducts,
   getCategories,
   getSkinConcerns,
+  getProductWithDetailsBySlug,
 } from "@/services/products"
 import { useCart } from "@/store/cart-context"
 import { useAuth } from "@/store/auth-context"
 import { createAddress, getAddresses, getCouponByCode, getCustomerOrders } from "@/services/orders"
 import { getDtdcTracking, type DtdcTrackingResponse } from "@/services/dtdc"
-import { adaptCatalogProduct } from "@/lib/product-adapter"
-import type { Address, Coupon, Order, OrderItem, Shipment } from "@/lib/types"
+import { adaptCatalogProduct, adaptProduct } from "@/lib/product-adapter"
+import { resolveProductImageUrl } from "@/lib/product-images"
+import { getAverageRating } from "@/services/reviews"
+import type {
+  Address,
+  Coupon,
+  Order,
+  OrderItem,
+  ProductWithDetails,
+  Shipment,
+} from "@/lib/types"
 import type { CheckoutMethod, ShippingAddress } from "@/services/razorpay"
 
-export type Route = "home" | "concerns" | "bag" | "orders" | "sign-in" | "sign-up"
+export type Route = "home" | "concerns" | "bag" | "orders" | "sign-in" | "product"
 export function readRoute(): Route {
   const path = window.location.hash.split("?")[0].replace(/^#\/?/, "")
-  return ["concerns", "bag", "orders", "sign-in", "sign-up"].includes(path)
+  if (path === "sign-up") return "sign-in"
+  if (path.startsWith("product/")) return "product"
+  return ["concerns", "bag", "orders", "sign-in"].includes(path)
     ? path as Route
     : "home"
+}
+
+export function readProductSlug() {
+  const path = window.location.hash.split("?")[0].replace(/^#\/?/, "")
+  if (!path.startsWith("product/")) return ""
+  return decodeURIComponent(path.slice("product/".length))
 }
 
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`
@@ -811,8 +829,21 @@ export function ConcernsPage() {
                   <article
                     className={`product-card${expanded ? " is-expanded" : ""}`}
                     key={p.id}
+                    onClick={(event) => {
+                      if (
+                        event.target instanceof Element &&
+                        event.target.closest("a, button")
+                      ) {
+                        return
+                      }
+                      window.location.hash = `/product/${encodeURIComponent(p.slug)}`
+                    }}
                   >
-                    <div className={`product-art art-${p.color}`}>
+                    <a
+                      className={`product-art art-${p.color}`}
+                      href={`#/product/${encodeURIComponent(p.slug)}`}
+                      aria-label={`View ${p.name}`}
+                    >
                       {p.badge && (
                         <span className={`badge ${p.badge === "New" ? "sage-badge" : ""}`}>
                           {p.badge}
@@ -827,12 +858,16 @@ export function ConcernsPage() {
                           label={p.name.split(" ").slice(0, 2).join(" ")}
                         />
                       )}
-                    </div>
+                    </a>
                     <div className="product-details product-card-details">
                       {category && (
                         <span className="eyebrow product-category">{category}</span>
                       )}
-                      <h3>{p.name}</h3>
+                      <h3>
+                        <a href={`#/product/${encodeURIComponent(p.slug)}`}>
+                          {p.name}
+                        </a>
+                      </h3>
                       {description && (
                         <>
                           <button
@@ -952,6 +987,278 @@ type BagProps = {
   summary: { itemCount: number; subtotal: number; items: CartItemUI[] } | null
   setQuantity: (itemId: string, quantity: number) => void
   removeItem: (itemId: string) => void
+}
+
+export function ProductDetailPage({
+  slug,
+  onAddToCart,
+}: {
+  slug: string
+  onAddToCart: (variantId: string, productName: string) => Promise<void>
+}) {
+  const [product, setProduct] = useState<ProductWithDetails | null>(null)
+  const [rating, setRating] = useState<{ average: number; count: number } | null>(null)
+  const [selectedVariantId, setSelectedVariantId] = useState("")
+  const [selectedImage, setSelectedImage] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [adding, setAdding] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError("")
+    setProduct(null)
+    setRating(null)
+    setSelectedImage(0)
+
+    getProductWithDetailsBySlug(slug)
+      .then(async (details) => {
+        if (!active) return
+        if (!details) {
+          setError("We couldn’t find that product. It may no longer be available.")
+          return
+        }
+
+        const averageRating = await getAverageRating(details.id)
+        if (!active) return
+        setProduct(details)
+        setRating(averageRating)
+        setSelectedVariantId(
+          details.variants.find((variant) => variant.is_default)?.id ??
+            details.variants[0]?.id ??
+            "",
+        )
+      })
+      .catch((cause: unknown) => {
+        console.error("Could not load product details", cause)
+        if (active) setError("We couldn’t load this product. Please try again.")
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [slug])
+
+  useEffect(() => {
+    if (product) document.title = `derma aura — ${product.name}`
+  }, [product])
+
+  if (loading) {
+    return (
+      <main className="store-page product-detail-page">
+        <div className="section-shell">
+          <Breadcrumb current="Product" />
+          <p className="product-detail-message" role="status">
+            Loading product details…
+          </p>
+        </div>
+      </main>
+    )
+  }
+
+  if (!product) {
+    return (
+      <main className="store-page product-detail-page">
+        <div className="section-shell">
+          <Breadcrumb current="Product" />
+          <section className="product-detail-message" role="alert">
+            <h1>Product unavailable</h1>
+            <p>{error || "We couldn’t find that product."}</p>
+            <a className="button" href="#/concerns">
+              Browse skincare <Icon name="arrow" size={17} />
+            </a>
+          </section>
+        </div>
+      </main>
+    )
+  }
+
+  const gallery = product.images
+    .slice()
+    .sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
+    .flatMap((image) => {
+      const url = resolveProductImageUrl(image.image_url)
+      return url
+        ? [{ id: image.id, url, alt: image.alt_text || product.name }]
+        : []
+    })
+  const images =
+    gallery.length > 0
+      ? gallery
+      : [{ id: "product", url: adaptProduct(product).imageUrl, alt: product.name }]
+  const activeImage = images[Math.min(selectedImage, images.length - 1)]
+  const variant = product.variants.find(
+    (item) => item.id === selectedVariantId,
+  )
+  const outOfStock = !variant || variant.stock_quantity <= 0
+  const category = product.category?.name ?? product.benefit_label
+
+  return (
+    <main className="store-page product-detail-page">
+      <div className="section-shell">
+        <Breadcrumb current={product.name} />
+        <div className="product-detail-layout">
+          <section className="product-detail-gallery" aria-label="Product images">
+            <div className={`product-detail-image art-${adaptProduct(product).color}`}>
+              {product.badge_text && (
+                <span className="badge product-detail-badge">
+                  {product.badge_text}
+                </span>
+              )}
+              <img src={activeImage.url} alt={activeImage.alt} />
+            </div>
+            {images.length > 1 && (
+              <div className="product-detail-thumbnails">
+                {images.map((image, index) => (
+                  <button
+                    key={image.id}
+                    type="button"
+                    className={index === selectedImage ? "active" : ""}
+                    aria-label={`View product image ${index + 1}`}
+                    aria-pressed={index === selectedImage}
+                    onClick={() => setSelectedImage(index)}
+                  >
+                    <img src={image.url} alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="product-detail-info">
+            {category && <span className="eyebrow">{category}</span>}
+            <h1 tabIndex={-1}>{product.name}</h1>
+            {product.short_description && (
+              <p className="product-detail-intro">{product.short_description}</p>
+            )}
+            {rating && rating.count > 0 && (
+              <p className="product-detail-rating" aria-label={`${rating.average} out of 5 from ${rating.count} reviews`}>
+                <span aria-hidden="true">★</span> {rating.average} · {rating.count}{" "}
+                {rating.count === 1 ? "review" : "reviews"}
+              </p>
+            )}
+            {product.key_benefits.length > 0 && (
+              <ul className="product-detail-benefits">
+                {product.key_benefits.map((benefit) => (
+                  <li key={benefit}>
+                    <Icon name="check" size={14} />
+                    {benefit}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="product-detail-price">
+              {variant ? (
+                <>
+                  <strong>{rupees(variant.price)}</strong>
+                  {variant.compare_at_price != null &&
+                    variant.compare_at_price > variant.price && (
+                      <>
+                        <del>{rupees(variant.compare_at_price)}</del>
+                        <span>
+                          {Math.round(
+                            ((variant.compare_at_price - variant.price) /
+                              variant.compare_at_price) *
+                              100,
+                          )}
+                          % off
+                        </span>
+                      </>
+                    )}
+                </>
+              ) : (
+                <strong>Currently unavailable</strong>
+              )}
+            </div>
+
+            {product.variants.length > 0 && (
+              <fieldset className="product-detail-sizes">
+                <legend>Select size</legend>
+                <div>
+                  {product.variants.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={
+                        item.id === selectedVariantId ? "selected" : ""
+                      }
+                      aria-pressed={item.id === selectedVariantId}
+                      onClick={() => setSelectedVariantId(item.id)}
+                    >
+                      <span>{item.size_label || item.variant_name || "Size"}</span>
+                      <strong>{rupees(item.price)}</strong>
+                      {item.compare_at_price != null &&
+                        item.compare_at_price > item.price && (
+                          <del>{rupees(item.compare_at_price)}</del>
+                        )}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+
+            <button
+              className="button product-detail-add"
+              type="button"
+              disabled={adding || outOfStock}
+              onClick={async () => {
+                if (!variant) return
+                setAdding(true)
+                try {
+                  await onAddToCart(variant.id, product.name)
+                } finally {
+                  setAdding(false)
+                }
+              }}
+            >
+              {outOfStock
+                ? "Currently unavailable"
+                : adding
+                  ? "Adding to bag…"
+                  : "Add to bag"}
+              <Icon name="bag" size={17} />
+            </button>
+
+            {product.skin_types.length > 0 && (
+              <p className="product-detail-skin-types">
+                <strong>Suitable for</strong> {product.skin_types.join(", ")} skin
+              </p>
+            )}
+            <div className="product-detail-assurance">
+              <span><Icon name="leaf" size={17} /> Thoughtful ingredients</span>
+              <span><Icon name="arrow" size={16} /> Complimentary shipping</span>
+            </div>
+          </section>
+        </div>
+
+        <div className="product-detail-description">
+          {product.description && (
+            <section>
+              <h2>About this ritual</h2>
+              <p>{product.description}</p>
+            </section>
+          )}
+          {product.how_to_use && (
+            <section>
+              <h2>How to use</h2>
+              <p>{product.how_to_use}</p>
+            </section>
+          )}
+          {product.concerns.length > 0 && (
+            <section>
+              <h2>Made for</h2>
+              <p>{product.concerns.map((concern) => concern.name).join(" · ")}</p>
+            </section>
+          )}
+        </div>
+      </div>
+    </main>
+  )
 }
 
 export function BagPage({
@@ -1537,9 +1844,6 @@ export function BagPage({
                   {user ? "Continue to delivery" : "Sign in to checkout"}
                 </button>
               )}
-              <a className="signup-checkout" href="#/sign-up?next=bag">
-                {user ? "" : "New here? Create an account"}
-              </a>
               <p className="checkout-demo-note">
                 {paymentMethod === "cod"
                   ? "Pay the delivery partner in cash when your order arrives."
@@ -1569,40 +1873,39 @@ export function BagPage({
 /* Auth page                                                          */
 /* ------------------------------------------------------------------ */
 export function AuthPage({
-  mode,
   user,
   onComplete,
+  onCreateAccount,
   onSignOut,
 }: {
-  mode: "sign-in" | "sign-up"
-  user: { id: string; email: string | null; full_name: string | null } | null
-  onComplete: (
-    email: string,
-    password: string,
-    fullName?: string,
-  ) => void | Promise<void>
+  user: {
+    id: string
+    email: string | null
+    phone: string | null
+    full_name: string | null
+  } | null
+  onComplete: (email: string, password: string) => void | Promise<void>
+  onCreateAccount: (email: string, password: string) => Promise<boolean>
   onSignOut: () => void
 }) {
-  const signup = mode === "sign-up"
   const nextBag =
     new URLSearchParams(window.location.hash.split("?")[1]).get("next") ===
     "bag"
   const nextOrders =
     new URLSearchParams(window.location.hash.split("?")[1]).get("next") ===
     "orders"
-  const nextQuery = nextBag ? "?next=bag" : nextOrders ? "?next=orders" : ""
-  const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [confirm, setConfirm] = useState("")
   const [visible, setVisible] = useState(false)
   const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [creatingAccount, setCreatingAccount] = useState(false)
   const [forgot, setForgot] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   return (
     <main className="store-page auth-page">
       <div className="section-shell">
-        <Breadcrumb current={signup ? "Create an account" : "Sign in"} />
+        <Breadcrumb current={creatingAccount ? "Create account" : "Sign in"} />
         <div className="auth-layout">
           <aside className="auth-story">
             <span className="eyebrow">
@@ -1647,14 +1950,15 @@ export function AuthPage({
                   Hello, <em>{user.full_name ?? "there"}.</em>
                 </h1>
                 <p>
-                  You’re signed in as <strong>{user.email}</strong>.
-                  Your bag is right where you left it.
+                  You’re signed in as{" "}
+                  <strong>{user.email ?? user.phone}</strong>. Your bag is right
+                  where you left it.
                 </p>
                 <div className="auth-demo-banner">
                   <Icon name="shield" size={18} />
                   <p>
-                    Your account is managed by Supabase Auth. Your profile lives
-                    in the profiles table.
+                    Your verified contact and account details are managed by
+                    Supabase Auth.
                   </p>
                 </div>
                 <a className="button" href="#/bag">
@@ -1670,47 +1974,21 @@ export function AuthPage({
               </div>
             ) : (
               <>
-                <div className="auth-tabs" aria-label="Account pages">
-                  <a
-                    href={`#/sign-in${nextQuery}`}
-                    aria-current={!signup ? "page" : undefined}
-                  >
-                    Sign in
-                  </a>
-                  <a
-                    href={`#/sign-up${nextQuery}`}
-                    aria-current={signup ? "page" : undefined}
-                  >
-                    Create an account
-                  </a>
-                </div>
                 <span className="eyebrow">
-                  {signup
-                    ? "YOUR GLOW STORY STARTS HERE"
-                    : "GOOD TO SEE YOU AGAIN"}
+                  {creatingAccount ? "A LITTLE CARE. A FRESH START." : "GOOD TO SEE YOU AGAIN"}
                 </span>
                 <h1 tabIndex={-1}>
-                  {signup ? (
-                    <>
-                      A little hello.
-                      <br />
-                      <em>A lot of good things.</em>
-                    </>
-                  ) : (
-                    <>
-                      Welcome back,
-                      <br />
-                      <em>glow-getter.</em>
-                    </>
-                  )}
+                  {creatingAccount ? "Create your" : "Welcome back,"}
+                  <br />
+                  <em>{creatingAccount ? "glow account." : "glow-getter."}</em>
                 </h1>
                 <p className="auth-description">
-                  {nextBag
-                    ? "Your bag is waiting. Sign in or join us to continue to checkout."
+                  {creatingAccount
+                    ? "Join us for thoughtful skincare and simple daily rituals."
+                    : nextBag
+                    ? "Your bag is waiting. Sign in to continue to checkout."
                     : nextOrders
-                      ? "Sign in or create an account to see your orders."
-                    : signup
-                      ? "Make yourself at home. A simpler skincare ritual starts with you."
+                      ? "Sign in to see your orders."
                       : "A moment for you, and the skin you’re in."}
                 </p>
                 <form
@@ -1718,41 +1996,30 @@ export function AuthPage({
                   onSubmit={async (e) => {
                     e.preventDefault()
                     setError("")
+                    setSuccess("")
                     setSubmitting(true)
                     try {
-                      if (signup && name.trim().length < 2) {
-                        setError(
-                          "Please enter your name (at least 2 characters).",
-                        )
-                        return
+                      if (creatingAccount) {
+                        const hasSession = await onCreateAccount(email.trim(), password)
+                        if (!hasSession) {
+                          setSuccess("Account created. Please check your email to confirm it before signing in.")
+                        }
+                      } else {
+                        await onComplete(email.trim(), password)
                       }
-                      if (signup && password !== confirm) {
-                        setError("Your passwords don’t match. Please try again.")
-                        return
-                      }
-                      await onComplete(email.trim(), password, signup ? name.trim() : undefined)
-                    } catch (err: any) {
-                      setError(err?.message || "Sign in failed. Please try again.")
+                    } catch (err) {
+                      setError(
+                        err instanceof Error
+                          ? err.message
+                          : creatingAccount
+                            ? "Account creation failed. Please try again."
+                            : "Sign in failed. Please try again.",
+                      )
                     } finally {
                       setSubmitting(false)
                     }
                   }}
                 >
-                  {signup && (
-                    <div className="form-field">
-                      <label htmlFor="auth-name">Your name</label>
-                      <input
-                        id="auth-name"
-                        autoComplete="name"
-                        placeholder="What should we call you?"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        minLength={2}
-                        maxLength={80}
-                        required
-                      />
-                    </div>
-                  )}
                   <div className="form-field">
                     <label htmlFor="auth-email">Email address</label>
                     <input
@@ -1766,26 +2033,17 @@ export function AuthPage({
                     />
                   </div>
                   <div className="form-field">
-                    <label htmlFor="auth-password">
-                      {signup ? "Create a password" : "Password"}
-                    </label>
+                    <label htmlFor="auth-password">Password</label>
                     <div className="password-input">
                       <input
                         id="auth-password"
                         type={visible ? "text" : "password"}
-                        autoComplete={
-                          signup ? "new-password" : "current-password"
-                        }
-                        placeholder={
-                          signup
-                            ? "At least 8 characters"
-                            : "Enter your password"
-                        }
+                        autoComplete={creatingAccount ? "new-password" : "current-password"}
+                        placeholder={creatingAccount ? "Create a password" : "Enter your password"}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        minLength={8}
+                        minLength={creatingAccount ? 6 : undefined}
                         required
-                        aria-describedby="password-hint"
                       />
                       <button
                         type="button"
@@ -1795,44 +2053,14 @@ export function AuthPage({
                         {visible ? "Hide" : "Show"}
                       </button>
                     </div>
-                    <small id="password-hint">
-                      Use a password with 8 or more characters.
-                    </small>
                   </div>
-                  {signup && (
-                    <div className="form-field">
-                      <label htmlFor="auth-confirm">Confirm password</label>
-                      <input
-                        id="auth-confirm"
-                        type={visible ? "text" : "password"}
-                        autoComplete="new-password"
-                        placeholder="One more time, just to be sure"
-                        value={confirm}
-                        onChange={(e) => {
-                          setConfirm(e.target.value)
-                          setError("")
-                        }}
-                        minLength={8}
-                        required
-                      />
-                    </div>
-                  )}
-                  {signup ? (
-                    <label className="auth-consent">
-                      <input type="checkbox" required />
-                      <span>
-                        I understand an account will be created in Supabase.
-                      </span>
-                    </label>
-                  ) : (
-                    <div className="forgot-row">
-                      <span>Just a little care, made simple.</span>
-                      <button type="button" onClick={() => setForgot(!forgot)}>
-                        Forgot password?
-                      </button>
-                    </div>
-                  )}
-                  {forgot && (
+                  {!creatingAccount && <div className="forgot-row">
+                    <span>Just a little care, made simple.</span>
+                    <button type="button" onClick={() => setForgot(!forgot)}>
+                      Forgot password?
+                    </button>
+                  </div>}
+                  {!creatingAccount && forgot && (
                     <p className="auth-inline-note" role="status">
                       Use the Supabase reset flow for real password recovery.
                     </p>
@@ -1842,6 +2070,11 @@ export function AuthPage({
                       {error}
                     </p>
                   )}
+                  {success && (
+                    <p className="auth-inline-note" role="status">
+                      {success}
+                    </p>
+                  )}
                   <button
                     className="button auth-submit"
                     type="submit"
@@ -1849,22 +2082,26 @@ export function AuthPage({
                   >
                     {submitting
                       ? "Please wait…"
-                      : signup
+                      : creatingAccount
                         ? "Create account"
                         : "Sign in"}
                     <Icon name="arrow" size={18} />
                   </button>
                 </form>
-                <p className="auth-switch">
-                  {signup
-                    ? "Already part of the derma aura family?"
-                    : "New to the derma aura family?"}{" "}
-                  <a
-                    href={`#/${signup ? "sign-in" : "sign-up"}${nextQuery}`}
-                  >
-                    {signup ? "Sign in" : "Create an account"}
-                  </a>
-                </p>
+                <button
+                  className="auth-back-link"
+                  type="button"
+                  onClick={() => {
+                    setCreatingAccount(!creatingAccount)
+                    setError("")
+                    setSuccess("")
+                    setForgot(false)
+                  }}
+                >
+                  {creatingAccount
+                    ? "Already have an account? Sign in"
+                    : "New here? Create an account"}
+                </button>
                 <a
                   href={nextBag ? "#/bag" : nextOrders ? "#/orders" : "#/concerns"}
                   className="auth-back-link"

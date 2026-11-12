@@ -3,15 +3,17 @@ import { useEffect, useRef, useState } from "react"
 import { Icon, Bottle, Button, type UIProduct } from "./storefront"
 import {
   ConcernsPage,
+  ProductDetailPage,
   BagPage,
   OrdersPage,
   AuthPage,
   readRoute,
+  readProductSlug,
   type Route,
 } from "./StorePages"
 import { useAuth } from "@/store/auth-context"
 import { useCart } from "@/store/cart-context"
-import { getFeaturedProducts } from "@/services/products"
+import { getFeaturedProducts, getProducts } from "@/services/products"
 import { adaptProducts } from "@/lib/product-adapter"
 import {
   createCodOrder,
@@ -74,6 +76,7 @@ const infoCopy: Record<string, string> = {
 
 export default function App() {
   const [route, setRoute] = useState<Route>(readRoute)
+  const [productSlug, setProductSlug] = useState(readProductSlug)
   const [coupon, setCoupon] = useState<Coupon | null>(null)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [panel, setPanel] = useState<"search" | null>(null)
@@ -83,10 +86,11 @@ export default function App() {
   const [info, setInfo] = useState<string | null>(null)
   const [email, setEmail] = useState("")
   const [subscribed, setSubscribed] = useState(false)
-  const [seconds, setSeconds] = useState(8 * 3600 + 42 * 60 + 18)
   const [scrolled, setScrolled] = useState(false)
   const [stage, setStage] = useState(0)
   const [products, setProducts] = useState<UIProduct[]>([])
+  const [catalogueProducts, setCatalogueProducts] = useState<UIProduct[]>([])
+  const [productLoadError, setProductLoadError] = useState("")
   const [expandedProducts, setExpandedProducts] = useState<string[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const serumRef = useRef<HTMLElement>(null)
@@ -108,6 +112,7 @@ export default function App() {
   useEffect(() => {
     const syncRoute = () => {
       setRoute(readRoute())
+      setProductSlug(readProductSlug())
       setMenu(false)
       setPanel(null)
       setInfo(null)
@@ -132,7 +137,7 @@ export default function App() {
       bag: "Your bag",
       orders: "My orders",
       "sign-in": "Sign in",
-      "sign-up": "Create an account",
+      product: "Product details",
     }
     document.title = `derma aura — ${titles[route]}`
     if (route !== "home")
@@ -145,11 +150,20 @@ export default function App() {
     let mounted = true
     ;(async () => {
       try {
-        const [featured] = await Promise.all([getFeaturedProducts(8)])
+        const [featured, catalogue] = await Promise.all([
+          getFeaturedProducts(8),
+          getProducts(),
+        ])
         if (!mounted) return
         setProducts(adaptProducts(featured))
+        setCatalogueProducts(adaptProducts(catalogue))
       } catch (err) {
         console.error("Failed to load initial data", err)
+        setProductLoadError(
+          err instanceof Error
+            ? err.message
+            : "The product catalogue could not be loaded.",
+        )
       } finally {
         if (mounted) setDataLoading(false)
       }
@@ -228,15 +242,20 @@ export default function App() {
     }
   }
 
-  async function completeDemoSignIn(emailValue: string, password: string, fullName?: string) {
-    if (fullName) {
-      await signUp(emailValue, password, fullName)
-    } else {
-      await signIn(emailValue, password)
-    }
-    if (new URLSearchParams(window.location.hash.split("?")[1]).get("next") === "orders") {
-      navigate("orders")
-    }
+  function navigateAfterAuth() {
+    const next = new URLSearchParams(window.location.hash.split("?")[1]).get("next")
+    if (next === "orders" || next === "bag") navigate(next)
+  }
+
+  async function completeSignIn(emailValue: string, password: string) {
+    await signIn(emailValue, password)
+    navigateAfterAuth()
+  }
+
+  async function completeSignUp(emailValue: string, password: string) {
+    const hasSession = await signUp(emailValue, password)
+    if (hasSession) navigate("home")
+    return hasSession
   }
 
   function handleAuthSignOut() {
@@ -245,10 +264,6 @@ export default function App() {
     navigate("sign-in")
   }
 
-  useEffect(() => {
-    const timer = setInterval(() => setSeconds((s) => Math.max(s - 1, 0)), 1000)
-    return () => clearInterval(timer)
-  }, [])
   useEffect(() => {
     const onScroll = () => {
       setScrolled(window.scrollY > 40)
@@ -310,18 +325,14 @@ export default function App() {
     }
   }, [panel, info])
 
-  async function handleAdd(p: UIProduct) {
-    if (!p.variantId) {
-      setNotice(`${p.name} is not available right now.`)
-      return
-    }
+  async function handleAddVariant(variantId: string, productName: string) {
     if (cartLoading) {
       setNotice("Your bag is still loading. Please try again.")
       return
     }
     try {
-      await addToCart(p.variantId, 1)
-      setNotice(`${p.name} added to your bag`)
+      await addToCart(variantId, 1)
+      setNotice(`${productName} added to your bag`)
     } catch (error) {
       console.error("Could not add product to bag", error)
       setNotice(
@@ -330,6 +341,13 @@ export default function App() {
           : "Could not add this item to your bag. Please try again.",
       )
     }
+  }
+  async function handleAdd(p: UIProduct) {
+    if (!p.variantId) {
+      setNotice(`${p.name} is not available right now.`)
+      return
+    }
+    await handleAddVariant(p.variantId, p.name)
   }
   function shop() {
     setMenu(false)
@@ -340,11 +358,6 @@ export default function App() {
     await setQuantity(itemId, quantity)
   }
 
-  const time = [
-    Math.floor(seconds / 3600),
-    Math.floor((seconds % 3600) / 60),
-    seconds % 60,
-  ]
   const productCard = (p: UIProduct, duplicate = false) => {
     const expanded = expandedProducts.includes(p.id)
     const category = p.type.length <= 30 ? p.type : null
@@ -355,8 +368,19 @@ export default function App() {
       <article
         className={`product-card${expanded ? " is-expanded" : ""}`}
         key={`${p.id}-${duplicate}`}
+        onClick={(event) => {
+          if (event.target instanceof Element && event.target.closest("a, button")) {
+            return
+          }
+          window.location.hash = `/product/${encodeURIComponent(p.slug)}`
+        }}
       >
-      <div className={`product-art art-${p.color}`}>
+      <a
+        tabIndex={duplicate ? -1 : undefined}
+        className={`product-art art-${p.color}`}
+        href={`#/product/${encodeURIComponent(p.slug)}`}
+        aria-label={`View ${p.name}`}
+      >
         {p.badge && (
           <span className={`badge ${p.badge === "New" ? "sage-badge" : ""}`}>
             {p.badge}
@@ -371,26 +395,26 @@ export default function App() {
             label={p.name.split(" ").slice(0, 2).join(" ")}
           />
         )}
-        <button
-          tabIndex={duplicate ? -1 : undefined}
-          className="product-quick"
-          aria-label={`View ${p.name}`}
-          onClick={() => {
-            setQuery(p.name)
-            setPanel("search")
-          }}
-        >
+        <span className="product-quick" aria-hidden="true">
           <Icon name="arrow" size={17} />
-        </button>
-      </div>
+        </span>
+      </a>
       <div className="product-details product-card-details">
         {category && <span className="eyebrow product-category">{category}</span>}
-        <h3>{p.name}</h3>
+        <h3>
+          <a
+            tabIndex={duplicate ? -1 : undefined}
+            href={`#/product/${encodeURIComponent(p.slug)}`}
+          >
+            {p.name}
+          </a>
+        </h3>
         {description && (
           <>
             <button
               type="button"
               className="description-toggle"
+              tabIndex={duplicate ? -1 : undefined}
               aria-expanded={expanded}
               onClick={() =>
                 setExpandedProducts((current) =>
@@ -472,10 +496,10 @@ export default function App() {
                         navigate("concerns")
                       }}
                     >
-                      Concerns <span>⌄</span>
+                      Products <span>⌄</span>
                     </button>
-                    <a href="#rituals" onClick={() => setMenu(false)}>
-                      Combos
+                    <a href="#shop" onClick={() => setMenu(false)}>
+                      Our catalogue
                     </a>
                     <button
                       onClick={() => {
@@ -490,7 +514,7 @@ export default function App() {
                       className="mobile-account-link"
                       onClick={() => navigate("sign-in")}
                     >
-                      {user ? "Your account" : "Sign in / Create an account"}
+                      {user ? "Your account" : "Sign in"}
                     </button>
                   </nav>
                   <div className="nav-actions">
@@ -523,7 +547,12 @@ export default function App() {
                   </div>
                 </div>
               </header>
-              {route === "concerns" ? (
+              {route === "product" ? (
+                <ProductDetailPage
+                  slug={productSlug}
+                  onAddToCart={handleAddVariant}
+                />
+              ) : route === "concerns" ? (
                 <ConcernsPage />
               ) : route === "bag" ? (
                 <BagPage
@@ -539,138 +568,60 @@ export default function App() {
                 />
               ) : route === "orders" ? (
                 <OrdersPage userId={user?.id ?? null} />
-              ) : route === "sign-in" || route === "sign-up" ? (
+              ) : route === "sign-in" ? (
                 <AuthPage
-                  key={route}
-                  mode={route}
                   user={user}
-                  onComplete={(
-                    emailValue: string,
-                    password: string,
-                    fullName?: string,
-                  ) => completeDemoSignIn(emailValue, password, fullName)}
+                  onComplete={completeSignIn}
+                  onCreateAccount={completeSignUp}
                   onSignOut={handleAuthSignOut}
                 />
               ) : (
                 <main>
-                  <section className="rituals section-shell" id="rituals">
-                    <div className="hero-heading">
-                      <span className="eyebrow light-eyebrow">
-                        <span className="tiny-line" /> OFFERS, PAIRINGS & LITTLE TREATS{" "}
-                        <span className="tiny-line" />
-                      </span>
-                      <h1>
-                        Offers & <em>combos.</em>
-                      </h1>
-                      <p>
-                        Thoughtful pairings and feel-good offers for your everyday routine.
-                      </p>
+                  <section className="shop-section catalogue-section" id="shop">
+                    <div className="section-heading section-shell">
+                      <div>
+                        <span className="eyebrow">THE DERMA AURA COLLECTION</span>
+                        <h1>
+                          Our <em>catalogue.</em>
+                        </h1>
+                      </div>
+                      <button
+                        className="text-link"
+                        onClick={() => {
+                          setQuery("")
+                          setPanel("search")
+                        }}
+                      >
+                        Browse all products <Icon name="arrow" size={18} />
+                      </button>
                     </div>
-                    <div className="combo-grid">
-                        <article className="combo-card routine-card">
-                          <img
-                            className="combo-photo"
-                            src="https://images.unsplash.com/photo-1748543669178-efd3de4e64e0?auto=format&fit=crop&w=1000&q=85"
-                            alt="A collection of amber skincare serums with botanical leaves"
-                          />
-                          <div className="photo-wash" />
-                          <div className="combo-copy">
-                            <span className="eyebrow">BETTER TOGETHER</span>
-                            <h2>
-                              Your daily glow,
-                              <br />
-                              all in one place.
-                            </h2>
-                            <p>Meet your perfectly paired essentials.</p>
+                    {productLoadError ? (
+                      <p className="catalogue-message" role="alert">
+                        We couldn’t load the catalogue. Please try again later.
+                      </p>
+                    ) : catalogueProducts.length === 0 ? (
+                      <p className="catalogue-message" role="status">
+                        No products are available right now.
+                      </p>
+                    ) : (
+                      <div
+                        className="marquee product-marquee catalogue-marquee"
+                        title="Products move from left to right; pauses on hover"
+                        aria-label="All skincare products, moving from left to right"
+                      >
+                        <div className="marquee-track">
+                          <div className="product-group">
+                            {catalogueProducts.map((p) => productCard(p))}
                           </div>
-                          <span className="saving-stamp">
-                            SAVE<span>₹400</span>
-                            <small>ON COMBOS</small>
-                          </span>
-                          <div className="combo-bottom">
-                            <Button
-                              onClick={() => {
-                                products.slice(0, 3).forEach(handleAdd)
-                                navigate("bag")
-                              }}
-                            >
-                              Shop routine combos
-                            </Button>
-                            <span>Less effort. More glow.</span>
+                          <div className="duplicate-group" aria-hidden="true">
+                            {catalogueProducts.map((p) => productCard(p, true))}
                           </div>
-                        </article>
-                        <article className="combo-card sale-card">
-                          <div className="sale-flower" aria-hidden="true">
-                            <Icon name="sun" size={100} />
-                          </div>
-                          <span className="eyebrow">YOUR GLOW-UP STARTS HERE</span>
-                          <h2>
-                            A little treat.
-                            <br />A lot of love.
-                          </h2>
-                          <div className="sale-number">
-                            30
-                            <span>
-                              %<small>OFF</small>
-                            </span>
-                          </div>
-                          <p>Good skin days, at even better prices.</p>
-                          <div
-                            className="countdown"
-                            aria-label={`${time[0]} hours ${time[1]} minutes ${time[2]} seconds left`}
-                          >
-                            {time.map((n, i) => (
-                              <div key={i}>
-                                <strong>{String(n).padStart(2, "0")}</strong>
-                                <span>{["HOURS", "MINS", "SECS"][i]}</span>
-                                {i < 2 && <b>:</b>}
-                              </div>
-                            ))}
-                          </div>
-                          <Button
-                            onClick={() => {
-                              setNotice(
-                                "Offer unlocked: use GLOW10 for an extra 10% at checkout",
-                              )
-                              shop()
-                            }}
-                          >
-                            Shop the glow sale
-                          </Button>
-                          <small className="sale-note">
-                            A little fleeting. Just like this offer.
-                          </small>
-                        </article>
-                        <article className="combo-card launch-card">
-                          <div className="combo-copy">
-                            <span className="badge sage-badge">JUST DROPPED</span>
-                            <h2>
-                              Sun-kissed.
-                              <br />
-                              Never sun-stressed.
-                            </h2>
-                            <p>Your daily dose of invisible protection.</p>
-                          </div>
-                          <div className="launch-visual">
-                            <div className="sun-disc" />
-                            <Bottle kind="tube" color="peach" label="Dewy SPF 50" />
-                            <span className="spf-note">
-                              SPF 50 PA++++
-                              <br />
-                              No white cast. All glow.
-                            </span>
-                          </div>
-                          <div className="combo-bottom">
-                            <Button
-                              onClick={() => {
-                                handleAdd(products[3])
-                                navigate("bag")
-                              }}
-                            >
-                              Meet your new SPF
-                            </Button>
-                          </div>
-                        </article>
+                        </div>
+                      </div>
+                    )}
+                    <div className="marquee-caption">
+                      <span className="moving-dot" /> Explore every product in the collection.
+                      <span className="swipe-note">Swipe to explore</span>
                     </div>
                     <div className="trust-strip">
                       <span>
@@ -688,43 +639,6 @@ export default function App() {
                       <span>
                         <span className="india-mark">IN</span> Made for Indian skin
                       </span>
-                    </div>
-                  </section>
-                  <section className="shop-section" id="shop">
-                    <div className="section-heading section-shell">
-                      <div>
-                        <span className="eyebrow">THE EVERYDAY ESSENTIALS</span>
-                        <h2>
-                          Good things for <em>your skin.</em>
-                        </h2>
-                      </div>
-                      <button
-                        className="text-link"
-                        onClick={() => {
-                          setQuery("")
-                          setPanel("search")
-                        }}
-                      >
-                        Explore all skincare <Icon name="arrow" size={18} />
-                      </button>
-                    </div>
-                    <div
-                      className="marquee product-marquee"
-                      title="Continuous linear loop, 40s per cycle"
-                      aria-label="Skincare products; continuous linear loop, 40s per cycle"
-                    >
-                      <div className="marquee-track">
-                        <div className="product-group">
-                          {products.map((p) => productCard(p))}
-                        </div>
-                        <div className="duplicate-group" aria-hidden="true">
-                          {products.map((p) => productCard(p, true))}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="marquee-caption">
-                      <span className="moving-dot" /> A little something for every skin
-                      story. <span className="swipe-note">Swipe to explore</span>
                     </div>
                   </section>
                   <section

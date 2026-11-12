@@ -1,8 +1,7 @@
 /**
  * Authentication data access layer.
  *
- * Uses Supabase Auth (auth.users) for session management and the public
- * `profiles` table for extended user data. profiles.id references auth.users.id.
+ * Uses Supabase Auth (auth.users) for session management and user metadata.
  */
 import { supabase } from '@/lib/supabase'
 import type { Profile, ProfileInsert } from '@/lib/types'
@@ -10,6 +9,7 @@ import type { Profile, ProfileInsert } from '@/lib/types'
 export type AuthUser = {
   id: string
   email: string | null
+  phone: string | null
   full_name: string | null
   avatar_url: string | null
   role: string | null
@@ -47,38 +47,8 @@ export function onAuthStateChange(callback: (user: AuthUser | null) => void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Sign up / Sign in                                                  */
+/* Sign in                                                            */
 /* ------------------------------------------------------------------ */
-export async function signUp({
-  email,
-  password,
-  fullName,
-}: {
-  email: string
-  password: string
-  fullName?: string
-}) {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { full_name: fullName ?? null },
-    },
-  })
-  if (error) throw error
-
-  // When email confirmations are off, create the profile immediately.
-  if (data.user) {
-    await upsertProfile({
-      id: data.user.id,
-      email: data.user.email ?? '',
-      full_name: fullName ?? null,
-    })
-  }
-
-  return { data, error: null }
-}
-
 export async function signIn({
   email,
   password,
@@ -91,14 +61,19 @@ export async function signIn({
     password,
   })
   if (error) throw error
-  if (data.user) {
-    await upsertProfile({
-      id: data.user.id,
-      email: data.user.email ?? '',
-      full_name: null,
-    })
-  }
   return { data, error: null }
+}
+
+export async function signUp({
+  email,
+  password,
+}: {
+  email: string
+  password: string
+}) {
+  const { data, error } = await supabase.auth.signUp({ email, password })
+  if (error) throw error
+  return data
 }
 
 export async function signOut() {
@@ -141,11 +116,13 @@ export async function updateProfile(userId: string, updates: Partial<Profile>) {
 function mapUser(user: {
   id: string
   email?: string | null
+  phone?: string | null
   user_metadata: { full_name?: string | null; avatar_url?: string | null } | null
 }): AuthUser {
   return {
     id: user.id,
     email: user.email ?? null,
+    phone: user.phone ?? null,
     full_name: user.user_metadata?.full_name ?? null,
     avatar_url: user.user_metadata?.avatar_url ?? null,
     role: null,

@@ -143,6 +143,20 @@ export async function getProductWithDetails(
   const product = await getProductById(id)
   if (!product) return null
 
+  return getProductDetails(product)
+}
+
+export async function getProductWithDetailsBySlug(
+  slug: string,
+): Promise<ProductWithDetails | null> {
+  const product = await getProductBySlug(slug)
+  if (!product) return null
+
+  return getProductDetails(product)
+}
+
+async function getProductDetails(product: Product): Promise<ProductWithDetails> {
+  const id = product.id
   const [images, variants, concerns] = await Promise.all([
     getProductImages(id),
     getProductVariants(id),
