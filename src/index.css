@@ -87,3 +87,56 @@ footer { background: #2E2620; color: #e7dece; }.footer-main { display: grid; gri
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; } *,*::before,*::after { animation: none !important; transition: none !important; }.marquee { overflow-x: auto; mask-image: none; padding-inline: 20px; }.marquee-track { transform: none !important; }.duplicate-group,.review-group[aria-hidden="true"] { display: none; }.swipe-note { display: inline; }.stage-0 .ingredient { opacity: 1; transform: none; }.serum-center .bottle-top { transform: none !important; }.serum-center .bottle { transform: scale(1.1) !important; }.stage-2 .serum-center .pipette { opacity: 0; }
 }
+.serum-section { padding: 48px 0 25px; }
+.serum-anatomy { height: 415px; }
+.serum-center { top: 32px; width: 190px; height: 340px; }
+.shield-product-image { display: block; position: relative; z-index: 1; width: auto; max-width: 100%; height: 315px; object-fit: contain; filter: drop-shadow(0 18px 15px #52391f35); animation: shield-float 5.5s ease-in-out infinite; }
+.serum-glow { top: -25px; }
+.ingredient { align-items: flex-start; }
+.ingredient h3 { font-size: 13px; line-height: 1.35; }
+.ingredient p { font-size: 9px; line-height: 1.6; }
+.ingredient-c { left: 75px; top: 67px; }
+.ingredient-n { left: 45px; top: 220px; }
+.ingredient-h { right: 50px; top: 80px; }
+.ingredient-e { right: 25px; top: 230px; }
+.serum-bottom { padding-top: 12px; }
+.serum-purchase { gap: 30px; }
+.shield-price { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.shield-price > strong { font-size: 22px; font-weight: 500; }
+.shield-price > span { color: #746352; font-size: 11px; }
+.serum-purchase .button { min-height: 48px; }
+.serum-bottom > p { font-size: 11px; line-height: 1.5; margin-top: 13px; }
+.shield-availability { color: #8c4929; font-size: 12px; margin: 10px 0 0; }
+.serum-purchase .button:disabled { cursor: not-allowed; opacity: .6; }
+@keyframes shield-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+@media (min-width: 761px) and (max-width: 1100px) {
+  .ingredient-c { left: 3%; }
+  .ingredient-n { left: 1%; }
+  .ingredient-h { right: 3%; }
+  .ingredient-e { right: 1%; }
+}
+@media (max-width: 760px) {
+  .serum-section { padding: 35px 0 23px; }
+  .serum-anatomy { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 10px; height: auto; max-width: 540px; padding: 270px 20px 0; }
+  .serum-center { top: 5px; width: 180px; height: 250px; }
+  .shield-product-image { height: 240px; }
+  .serum-glow { top: -10px; width: 285px; height: 285px; }
+  .orbit-one { width: 255px; height: 255px; top: 130px; }
+  .orbit-two { width: 315px; height: 315px; top: 130px; }
+  .ingredient { position: relative; top: auto; right: auto; bottom: auto; left: auto; width: 100%; min-height: 0; padding: 12px 13px; gap: 10px; border-radius: 10px; align-items: flex-start; }
+  .ingredient h3 { font-size: 12px; margin-bottom: 5px; line-height: 1.4; }
+  .ingredient p { font-size: 10px; line-height: 1.55; }
+  .ingredient-icon { width: 23px; padding-top: 1px; }
+  .ingredient-icon svg { width: 19px; height: 19px; }
+  .callout-line { display: none; }
+  .stage-0 .ingredient { opacity: 1; transform: none; }
+  .serum-bottom { padding-top: 17px; }
+  .serum-purchase { flex-direction: column; gap: 12px; margin-top: 8px; }
+  .shield-price { align-items: center; }
+  .shield-price > strong { font-size: 23px; }
+  .shield-price > span { font-size: 12px; }
+  .serum-purchase .button { width: min(100% - 40px, 280px); min-width: 0; min-height: 48px; justify-content: center; gap: 20px; }
+  .serum-bottom > p { font-size: 11px; margin: 12px auto 0; padding: 0 20px; max-width: 400px; }
+  .shield-availability { font-size: 11px; margin: 10px 20px 0; }
+  .stage-indicator { margin-top: 15px; }
+}

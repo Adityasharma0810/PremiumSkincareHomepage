@@ -22,12 +22,12 @@ export interface UIProduct {
   variantId: string | null
   name: string
   type: string
-  price: number
+  price: number | null
   old: number | null
   color: string
   kind: string
   badge: string | null
-  imageUrl: string
+  imageUrl: string | null
   slug: string
   shortDescription: string | null
 }
@@ -39,9 +39,6 @@ const COLOUR_BY_KIND: Record<string, string> = {
   tube: 'peach',
 }
 
-const DEFAULT_IMAGE =
-  'https://images.unsplash.com/photo-1620915567248-b92229304e4e?auto=format&fit=crop&w=600&q=80'
-
 export function adaptProduct(
   product: ProductWithDetails | any,
 ): UIProduct {
@@ -52,26 +49,25 @@ export function adaptProduct(
     activeVariants[0] ||
     null
   const images = product.images ?? product.product_images ?? []
-  const primaryImage = resolveProductImageUrl(
+  const imageUrl = resolveProductImageUrl(
     images.find((img: any) => img.is_primary)?.image_url
-      ?? images[0]?.image_url
-      ?? DEFAULT_IMAGE,
-  ) ?? DEFAULT_IMAGE
+      ?? images[0]?.image_url,
+  )
 
-  const price = defaultVariant?.price ?? 0
+  const price = defaultVariant?.price ?? null
   const old = defaultVariant?.compare_at_price ?? null
 
   return {
     id: product.id,
     variantId: defaultVariant?.id ?? null,
     name: product.name,
-    type: product.benefit_label || 'Skincare essentials',
+    type: product.benefit_label ?? '',
     price,
     old,
     color: COLOUR_BY_KIND[product.kind || ''] || 'amber',
     kind: product.kind || 'serum',
     badge: product.badge_text || null,
-    imageUrl: primaryImage,
+    imageUrl,
     slug: product.slug,
     shortDescription: product.short_description ?? null,
   }
@@ -92,26 +88,25 @@ export function adaptCatalogProduct(row: any): UIProduct {
   const variants = Array.isArray(row.product_variants) ? row.product_variants : []
   const activeVariants = variants.filter((v: any) => v.is_active !== false)
   const defaultVariant = activeVariants.find((v: any) => v.is_default) || activeVariants[0] || null
-  const primaryImage = resolveProductImageUrl(
+  const imageUrl = resolveProductImageUrl(
     images.find((img: any) => img.is_primary)?.image_url
-      ?? images[0]?.image_url
-      ?? DEFAULT_IMAGE,
-  ) ?? DEFAULT_IMAGE
+      ?? images[0]?.image_url,
+  )
 
-  const price = defaultVariant?.price ?? 0
+  const price = defaultVariant?.price ?? null
   const old = defaultVariant?.compare_at_price ?? null
 
   return {
     id: row.id,
     variantId: defaultVariant?.id ?? null,
     name: row.name,
-    type: row.benefit_label || 'Skincare essentials',
+    type: row.benefit_label ?? '',
     price,
     old,
     color: COLOUR_BY_KIND[row.kind || ''] || 'amber',
     kind: row.kind || 'serum',
     badge: row.badge_text || null,
-    imageUrl: primaryImage,
+    imageUrl,
     slug: row.slug,
     shortDescription: row.short_description ?? null,
   }

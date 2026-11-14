@@ -5,8 +5,8 @@ This deliverable is a responsive React prototype, not a native Figma file.
 
 ## Responsive layouts
 
-- Desktop target: 1440px; three editorial offer cards, centered navigation, full ingredient callouts.
-- Mobile target: 390px; centered wordmark, hamburger navigation, swipeable offer cards, two-column ingredient pills.
+- Desktop target: 1440px; wide editorial hero with the Derma Aura wordmark, tagline, model crop and gold accents, followed by a horizontal product carousel.
+- Mobile target: 390px; responsive hero with overlaid model crop, centered wordmark in the sticky navigation, hamburger navigation and a swipeable product carousel.
 - CSS grid and flexbox provide the equivalent responsive layout behavior of auto-layout.
 
 ## Color styles
@@ -42,9 +42,11 @@ Deep brown is used for text on beige where the specified ivory/beige pairing wou
 
 ## Prototype annotations
 
-- Product marquee: **continuous linear loop, 40s per cycle**, right to left.
+- Product carousel: horizontal scrolling with previous/next controls; it renders all active products returned by Supabase and does not cap the collection at eight.
 - Review marquee: continuous linear loop, 55s per cycle, left to right.
-- Both pause on hover or keyboard focus.
+- The review marquee pauses on hover or keyboard focus.
+- Homepage and catalogue product cards use Supabase product images and variant prices; missing product images or prices are not replaced with invented data.
+- The hero uses the existing local Derma Aura logo and a CSS crop of the supplied model reference. Marble-like color and gold-line details are CSS, not a displayed reference poster.
 - Reduced-motion mode disables animation and presents static, horizontally scrollable rows.
 - Serum: three scroll-reactive CSS transition states: assembled, mid-explode, fully exploded.
   Dropper and pipette separate from the bottle, with ingredient droplets and glowing backdrop.
