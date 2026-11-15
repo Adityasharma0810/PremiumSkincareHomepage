@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import { Icon, Bottle, Button, type UIProduct } from "./storefront"
+import { Icon, Button, type UIProduct } from "./storefront"
 import {
   ConcernsPage,
   ProductDetailPage,
@@ -13,7 +13,11 @@ import {
 } from "./StorePages"
 import { useAuth } from "@/store/auth-context"
 import { useCart } from "@/store/cart-context"
-import { getFeaturedProducts, getProducts } from "@/services/products"
+import {
+  getFeaturedProducts,
+  getProductVariants,
+  getProducts,
+} from "@/services/products"
 import { adaptProducts } from "@/lib/product-adapter"
 import {
   createCodOrder,
@@ -23,7 +27,7 @@ import {
   type CheckoutMethod,
   type ShippingAddress,
 } from "@/services/razorpay"
-import type { Coupon } from "@/lib/types"
+import type { Coupon, ProductVariant } from "@/lib/types"
 import "./pages.css"
 
 const reviews = [
@@ -91,9 +95,13 @@ export default function App() {
   const [products, setProducts] = useState<UIProduct[]>([])
   const [catalogueProducts, setCatalogueProducts] = useState<UIProduct[]>([])
   const [productLoadError, setProductLoadError] = useState("")
+  const [auraShieldVariant, setAuraShieldVariant] = useState<ProductVariant | null>(null)
+  const [auraShieldLoadError, setAuraShieldLoadError] = useState("")
+  const [auraShieldAdding, setAuraShieldAdding] = useState(false)
   const [expandedProducts, setExpandedProducts] = useState<string[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const serumRef = useRef<HTMLElement>(null)
+  const auraShieldAddInProgress = useRef(false)
   const catalogueRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
@@ -158,6 +166,39 @@ export default function App() {
         if (!mounted) return
         setProducts(adaptProducts(featured))
         setCatalogueProducts(adaptProducts(catalogue))
+        const auraShieldProduct =
+          catalogue.find(
+            (product) =>
+              product.name.trim().toLowerCase() === "aura shield sunscreen",
+          ) ??
+          catalogue.find(
+            (product) => product.name.trim().toLowerCase() === "aura shield",
+          )
+        if (!auraShieldProduct) {
+          setAuraShieldLoadError("Aura Shield Sunscreen is currently unavailable.")
+        } else {
+          try {
+            const variants = await getProductVariants(auraShieldProduct.id)
+            if (!mounted) return
+            const active50gVariant = variants.find(
+              (variant) =>
+                variant.is_active &&
+                variant.size_label?.replace(/\s+/g, "").toLowerCase() === "50g",
+            )
+            if (!active50gVariant) {
+              setAuraShieldLoadError(
+                "The active 50 g Aura Shield variant is currently unavailable.",
+              )
+            } else {
+              setAuraShieldVariant(active50gVariant)
+            }
+          } catch (error) {
+            console.error("Failed to load the Aura Shield variant", error)
+            setAuraShieldLoadError(
+              "Aura Shield details could not be loaded. Please try again later.",
+            )
+          }
+        }
       } catch (err) {
         console.error("Failed to load initial data", err)
         setProductLoadError(
@@ -343,6 +384,39 @@ export default function App() {
       )
     }
   }
+  async function handleShopAuraShield() {
+    if (auraShieldAddInProgress.current) return
+    if (!auraShieldVariant) {
+      setNotice(auraShieldLoadError || "Aura Shield Sunscreen is unavailable.")
+      return
+    }
+    if (auraShieldVariant.stock_quantity <= 0) {
+      setNotice("Aura Shield Sunscreen is currently out of stock.")
+      return
+    }
+    if (cartLoading) {
+      setNotice("Your bag is still loading. Please try again.")
+      return
+    }
+
+    auraShieldAddInProgress.current = true
+    setAuraShieldAdding(true)
+    try {
+      await addToCart(auraShieldVariant.id, 1)
+      setNotice("Aura Shield added to your bag.")
+      navigate("bag")
+    } catch (error) {
+      console.error("Could not add Aura Shield to bag", error)
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Could not add Aura Shield to your bag. Please try again.",
+      )
+    } finally {
+      auraShieldAddInProgress.current = false
+      setAuraShieldAdding(false)
+    }
+  }
   async function handleAdd(p: UIProduct) {
     if (!p.variantId) {
       setNotice(`${p.name} is not available right now.`)
@@ -398,11 +472,7 @@ export default function App() {
         {p.imageUrl ? (
           <img className="product-photo" src={p.imageUrl} alt={p.name} />
         ) : (
-          <Bottle
-            color={p.color}
-            kind={p.kind}
-            label={p.name.split(" ").slice(0, 2).join(" ")}
-          />
+          <span className="product-image-unavailable">Product image unavailable</span>
         )}
         <span className="product-quick" aria-hidden="true">
           <Icon name="arrow" size={17} />
@@ -441,8 +511,8 @@ export default function App() {
           </>
         )}
         <div className="product-card-price">
-          <span className="product-price">₹{p.price}</span>
-          {p.old != null && p.old > p.price && (
+          {p.price != null && <span className="product-price">₹{p.price}</span>}
+          {p.price != null && p.old != null && p.old > p.price && (
             <>
               <del>₹{p.old}</del>
               <strong>{Math.round(((p.old - p.price) / p.old) * 100)}% OFF</strong>
@@ -478,8 +548,8 @@ export default function App() {
                   </button>
                   <a className="logo" href="#/" aria-label="derma aura home">
                     <img
-                      src="https://i.pinimg.com/736x/90/21/62/902162d122a8865e264c661495dfa3b0.jpg"
-                      alt=""
+                      src="/derma-aura-nav-logo.png"
+                      alt="Derma Aura"
                     />
                   </a>
                   <nav
@@ -575,13 +645,54 @@ export default function App() {
                 />
               ) : (
                 <main>
+                  <section className="brand-hero" aria-labelledby="brand-hero-title">
+                    <div className="brand-hero-inner">
+                      <div className="brand-hero-copy">
+                        <span className="eyebrow">SKINCARE, WITH SOUL</span>
+                        <h1 id="brand-hero-title">
+                          Beauty that begins
+                          <br />
+                          <em>Beneath the Surface.</em>
+                        </h1>
+                        <p>Thoughtful skincare for your everyday.</p>
+                        <ul className="brand-hero-trust" aria-label="Product assurances">
+                          <li><Icon name="check" size={15} /><span>Clinically Tested</span></li>
+                          <li><Icon name="shield" size={15} /><span>Dermatologically Recommended</span></li>
+                        </ul>
+                        <div className="brand-hero-actions">
+                          <button
+                            className="brand-hero-primary"
+                            onClick={() =>
+                              document
+                                .getElementById("shop")
+                                ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                          >
+                            Shop the collection <Icon name="arrow" size={18} />
+                          </button>
+                          <button
+                            className="brand-hero-secondary"
+                            onClick={() => setInfo("Our story")}
+                          >
+                            Discover our story
+                          </button>
+                        </div>
+                      </div>
+                      <div className="brand-hero-portrait" aria-hidden="true">
+                        <img
+                          src="/images/Radiant%20Beauty%20Skincare%20Portrait.png"
+                          alt=""
+                        />
+                      </div>
+                    </div>
+                  </section>
                   <section className="shop-section catalogue-section" id="shop">
                     <div className="section-heading section-shell">
                       <div>
                         <span className="eyebrow">THE DERMA AURA COLLECTION</span>
-                        <h1>
-                          Our <em>catalogue.</em>
-                        </h1>
+                        <h2>
+                          Discover our <em>collection.</em>
+                        </h2>
                       </div>
                       <div className="catalogue-actions">
                         <button
@@ -661,19 +772,26 @@ export default function App() {
                   >
                     <div className="section-heading centered">
                       <span className="eyebrow">
-                        SMALL BOTTLE. BEAUTIFUL POSSIBILITIES.
+                        AURA SHIELD SUNSCREEN
                       </span>
-                      <h2>Meet the glow-getter.</h2>
+                      <h2>Meet your everyday sun shield.</h2>
                       <p>
-                        Inside our bestseller: <strong>Vitamin C Glow Serum</strong>
+                        Discover our daily essential: Aura Shield Sunscreen.
                       </p>
+                      <span className="shield-product-type">
+                        Broad-Spectrum Hybrid-Filter Sunscreen
+                      </span>
                     </div>
                     <div className="serum-anatomy">
                       <div className="glow-orbit orbit-one" />
                       <div className="glow-orbit orbit-two" />
                       <div className="serum-center">
                         <div className="serum-glow" />
-                        <Bottle large label="Vitamin C" />
+                        <img
+                          className="shield-product-image"
+                          src="/images/Derma%20Aura%20Aura%20Shield%20Sunscreen%20Tube.png"
+                          alt="Derma Aura Aura Shield Sunscreen tube, SPF 50 PA+++, 50 g"
+                        />
                         <span className="floating-drop drop-one" />
                         <span className="floating-drop drop-two" />
                         <span className="floating-drop drop-three" />
@@ -683,18 +801,24 @@ export default function App() {
                           <Icon name="sun" />
                         </div>
                         <div>
-                          <h3>Vitamin C</h3>
-                          <p>A brighter, more radiant you.</p>
+                          <h3>Organic + Mineral Filters</h3>
+                          <p>
+                            Ethylhexyl methoxycinnamate, avobenzone, zinc oxide
+                            and titanium dioxide together.
+                          </p>
                         </div>
                         <span className="callout-line" />
                       </div>
                       <div className="ingredient ingredient-n">
                         <div className="ingredient-icon">
-                          <Icon name="leaf" />
+                          <Icon name="drop" />
                         </div>
                         <div>
-                          <h3>Niacinamide</h3>
-                          <p>Even tone. Effortless confidence.</p>
+                          <h3>Iron Oxides</h3>
+                          <p>
+                            Help block visible light, a recognised melasma
+                            relapse trigger.
+                          </p>
                         </div>
                         <span className="callout-line" />
                       </div>
@@ -703,8 +827,11 @@ export default function App() {
                           <Icon name="drop" />
                         </div>
                         <div>
-                          <h3>Hyaluronic Acid</h3>
-                          <p>A long drink of hydration.</p>
+                          <h3>Phospholipids</h3>
+                          <p>
+                            Improve spreadability and absorption, leaving no
+                            visible white patches.
+                          </p>
                         </div>
                         <span className="callout-line" />
                       </div>
@@ -713,44 +840,62 @@ export default function App() {
                           <Icon name="shield" />
                         </div>
                         <div>
-                          <h3>Vitamin E + Ferulic Acid</h3>
-                          <p>Your daily defence, strengthened.</p>
+                          <h3>Suncat DE Booster</h3>
+                          <p>
+                            Supports SPF performance, UVA/UVB balance and
+                            photostability.
+                          </p>
                         </div>
                         <span className="callout-line" />
                       </div>
-                      <span className="anatomy-note">
-                        Good chemistry.
-                        <br />
-                        <em>Even better skin.</em>
-                      </span>
                     </div>
                     <div className="serum-bottom">
-                      <div className="serum-rating">
-                        <span className="stars">★★★★★</span>
-                        <span>
-                          4.9/5 <span className="muted">(1,240 happy reviews)</span>
-                        </span>
-                      </div>
                       <div className="serum-purchase">
-                        <strong>
-                          ₹699 <del>₹899</del>
-                        </strong>
-                        <Button
-                          onClick={() => {
-                            handleAdd(products[0])
-                            navigate("bag")
-                          }}
+                        <div className="shield-price">
+                          <strong>
+                            {auraShieldVariant
+                              ? `₹${Number(auraShieldVariant.price).toLocaleString("en-IN")}`
+                              : "Price unavailable"}
+                          </strong>
+                          {auraShieldVariant && (
+                            <span>
+                              {auraShieldVariant.size_label?.replace(
+                                /^\s*50\s*g\s*$/i,
+                                "50 g",
+                              )}{" "}
+                              · SPF 50 PA+++
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          className="button"
+                          type="button"
+                          disabled={
+                            !auraShieldVariant ||
+                            auraShieldVariant.stock_quantity <= 0 ||
+                            auraShieldAdding ||
+                            cartLoading
+                          }
+                          onClick={handleShopAuraShield}
                         >
-                          Shop this serum
-                        </Button>
+                          {auraShieldAdding ? "Adding to bag…" : "Shop Aura Shield"}
+                          <Icon name="arrow" size={17} />
+                        </button>
                       </div>
-                      <p>30 ml of everyday radiance. For all skin types.</p>
+                      {auraShieldLoadError && !auraShieldVariant && (
+                        <p className="shield-availability" role="alert">
+                          {auraShieldLoadError}
+                        </p>
+                      )}
+                      <p>
+                        Broader shield. Zero white cast. Visibly brighter skin.
+                      </p>
                     </div>
                     <div
                       className="stage-indicator"
-                      aria-label={`Serum animation frame ${stage + 1} of 3`}
+                      aria-label={`Sunscreen animation frame ${stage + 1} of 3`}
                     >
-                      {["The formula", "The science", "The glow"].map((label, i) => (
+                      {["The shield", "The filters", "Everyday SPF"].map((label, i) => (
                         <button
                           key={label}
                           className={stage === i ? "active" : ""}
@@ -997,12 +1142,6 @@ export default function App() {
               >
                 <Icon name="chat" size={25} />
               </button>
-              {notice && (
-                <div className="toast" role="status">
-                  <Icon name="check" size={18} />
-                  {notice}
-                </div>
-              )}
               {(panel || info) && (
                 <div
                   className="modal-overlay"
@@ -1088,15 +1227,17 @@ export default function App() {
                             .map((p) => (
                               <div className="search-result" key={p.id}>
                                 <div className={`search-thumb art-${p.color}`}>
-                                  <Bottle
-                                    color={p.color}
-                                    kind={p.kind}
-                                    label={p.name.split(" ").slice(0, 2).join(" ")}
-                                  />
+                                  {p.imageUrl ? (
+                                    <img src={p.imageUrl} alt="" />
+                                  ) : (
+                                    <span className="product-image-unavailable">
+                                      Product image unavailable
+                                    </span>
+                                  )}
                                 </div>
                                 <div>
                                   <h3>{p.name}</h3>
-                                  <span>₹{p.price}</span>
+                                  {p.price != null && <span>₹{p.price}</span>}
                                 </div>
                                 <button className="add-button" onClick={() => handleAdd(p)}>
                                   <Icon name="plus" size={14} /> Add
@@ -1121,6 +1262,12 @@ export default function App() {
               )}
             </>
           )}
+      {notice && (
+        <div className="toast" role="status">
+          <Icon name="check" size={18} />
+          {notice}
+        </div>
+      )}
         </>
   )
 }

@@ -592,15 +592,18 @@ export function ConcernsPage() {
     const categoryMatch = category === "all" || p.kind === category
     const priceMatch =
       price === "all" ||
-      (price === "under500"
-        ? p.price < 500
-        : price === "500to700"
-          ? p.price >= 500 && p.price <= 700
-          : p.price > 700)
+      (p.price != null &&
+        (price === "under500"
+          ? p.price < 500
+          : price === "500to700"
+            ? p.price >= 500 && p.price <= 700
+            : p.price > 700))
     return categoryMatch && priceMatch
   }).sort((a, b) => {
-    if (sort === "low") return a.price - b.price
-    if (sort === "high") return b.price - a.price
+    if (sort === "low")
+      return (a.price ?? Number.POSITIVE_INFINITY) - (b.price ?? Number.POSITIVE_INFINITY)
+    if (sort === "high")
+      return (b.price ?? Number.NEGATIVE_INFINITY) - (a.price ?? Number.NEGATIVE_INFINITY)
     return 0
   })
 
@@ -852,11 +855,9 @@ export function ConcernsPage() {
                       {p.imageUrl ? (
                         <img className="product-photo" src={p.imageUrl} alt={p.name} />
                       ) : (
-                        <Bottle
-                          color={p.color}
-                          kind={p.kind}
-                          label={p.name.split(" ").slice(0, 2).join(" ")}
-                        />
+                        <span className="product-image-unavailable">
+                          Product image unavailable
+                        </span>
                       )}
                     </a>
                     <div className="product-details product-card-details">
@@ -890,8 +891,10 @@ export function ConcernsPage() {
                         </>
                       )}
                       <div className="product-card-price">
-                        <span className="product-price">₹{p.price}</span>
-                        {p.old != null && p.old > p.price && (
+                        {p.price != null && (
+                          <span className="product-price">₹{p.price}</span>
+                        )}
+                        {p.price != null && p.old != null && p.old > p.price && (
                           <>
                             <del>₹{p.old}</del>
                             <strong>{Math.round(((p.old - p.price) / p.old) * 100)}% OFF</strong>
@@ -973,6 +976,7 @@ type CartItemUI = {
   sku: string | null
   sizeLabel: string | null
   unitPrice: number
+  compareAtPrice: number | null
   lineTotal: number
   imageUrl: string | null
 }
@@ -1086,11 +1090,16 @@ export function ProductDetailPage({
         ? [{ id: image.id, url, alt: image.alt_text || product.name }]
         : []
     })
+  const fallbackImageUrl = adaptProduct(product).imageUrl
   const images =
     gallery.length > 0
       ? gallery
-      : [{ id: "product", url: adaptProduct(product).imageUrl, alt: product.name }]
-  const activeImage = images[Math.min(selectedImage, images.length - 1)]
+      : fallbackImageUrl
+        ? [{ id: "product", url: fallbackImageUrl, alt: product.name }]
+        : []
+  const activeImage = images.length
+    ? images[Math.min(selectedImage, images.length - 1)]
+    : null
   const variant = product.variants.find(
     (item) => item.id === selectedVariantId,
   )
@@ -1109,7 +1118,13 @@ export function ProductDetailPage({
                   {product.badge_text}
                 </span>
               )}
-              <img src={activeImage.url} alt={activeImage.alt} />
+              {activeImage ? (
+                <img src={activeImage.url} alt={activeImage.alt} />
+              ) : (
+                <span className="product-image-unavailable">
+                  Product image unavailable
+                </span>
+              )}
             </div>
             {images.length > 1 && (
               <div className="product-detail-thumbnails">
@@ -1354,7 +1369,13 @@ export function BagPage({
     : 0
   const shipping = 0
   const savings =
-    items.reduce((sum, i) => sum + (i.unitPrice - 0) * i.quantity, 0) + discount
+    items.reduce(
+      (sum, item) =>
+        sum +
+        Math.max(0, (item.compareAtPrice ?? item.unitPrice) - item.unitPrice) *
+          item.quantity,
+      0,
+    ) + discount
 
   function updateShippingAddress<K extends keyof ShippingAddress>(field: K, value: ShippingAddress[K]) {
     setSelectedAddressId("")
@@ -1539,7 +1560,10 @@ export function BagPage({
                   </div>
                   <div className="bag-line-price">
                     <strong>{rupees(p.lineTotal)}</strong>
-                    <del>{rupees(p.unitPrice * p.quantity)}</del>
+                    {p.compareAtPrice != null &&
+                      p.compareAtPrice > p.unitPrice && (
+                        <del>{rupees(p.compareAtPrice * p.quantity)}</del>
+                      )}
                     {p.quantity > 1 && <small>{rupees(p.unitPrice)} each</small>}
                   </div>
                 </article>
@@ -1634,9 +1658,11 @@ export function BagPage({
                 <strong>{rupees(subtotal + shipping - discount)}</strong>
               </div>
               <p className="summary-tax">Inclusive of all taxes.</p>
-              <p className="summary-savings">
-                A little win. You’re saving {rupees(savings)} today.
-              </p>
+              {savings > 0 && (
+                <p className="summary-savings">
+                  A little win. You’re saving {rupees(savings)} today.
+                </p>
+              )}
               {user ? (
                 <div className="checkout-auth-note">
                   <Icon name="check" size={16} />
@@ -1923,10 +1949,18 @@ export function AuthPage({
             <div className="auth-product-scene">
               <div className="auth-orbit" />
               <div className="auth-bottle-one">
-                <Bottle label="Vitamin C" />
+                <img
+                  className="auth-product-image auth-moisturizer-image"
+                  src="/images/Derma%20Aura%20Hydrating%20Moisturizer%20Tube.png"
+                  alt="Cera Aura Ceramide Moisturiser, 100 g"
+                />
               </div>
               <div className="auth-bottle-two">
-                <Bottle color="sage" kind="jar" label="Barrier Repair" />
+                <img
+                  className="auth-product-image"
+                  src="/images/Derma%20Aura%20Aura%20Shield%20Sunscreen%20Tube.png"
+                  alt="Aura Shield Sunscreen, SPF 50 PA+++, 50 g"
+                />
               </div>
               <span className="auth-scene-caption">
                 Good chemistry.

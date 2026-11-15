@@ -138,6 +138,7 @@ export interface CartSummary {
     sku: string | null
     sizeLabel: string | null
     unitPrice: number
+    compareAtPrice: number | null
     lineTotal: number
     imageUrl: string | null
   }>
@@ -170,6 +171,7 @@ export async function getCartSummary(cartId: string): Promise<CartSummary> {
       sku: string | null
       size_label: string | null
       price: number
+      compare_at_price: number | null
       product: {
         name: string
         slug: string
@@ -194,6 +196,7 @@ export async function getCartSummary(cartId: string): Promise<CartSummary> {
       sku: row.variant?.sku ?? null,
       sizeLabel: row.variant?.size_label ?? null,
       unitPrice,
+      compareAtPrice: row.variant?.compare_at_price ?? null,
       lineTotal,
       imageUrl: resolveProductImageUrl(
         row.variant?.product?.product_images?.find((image) => image.is_primary)?.image_url
@@ -220,6 +223,7 @@ export async function getGuestCartSummary(
       sku,
       size_label,
       price,
+      compare_at_price,
       is_active,
       product:products (
         name,
@@ -237,6 +241,7 @@ export async function getGuestCartSummary(
     sku: string | null
     size_label: string | null
     price: number
+    compare_at_price: number | null
     product: {
       name: string
       slug: string
@@ -258,6 +263,10 @@ export async function getGuestCartSummary(
       sku: variant.sku,
       sizeLabel: variant.size_label,
       unitPrice: Number(variant.price),
+      compareAtPrice:
+        variant.compare_at_price == null
+          ? null
+          : Number(variant.compare_at_price),
       lineTotal,
       imageUrl: resolveProductImageUrl(
         images.find((image) => image.is_primary)?.image_url ?? images[0]?.image_url,
