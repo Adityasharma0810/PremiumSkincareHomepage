@@ -165,8 +165,8 @@ export async function verifyRazorpayPayment({
   orderId: string
   cartId: string
   payment: RazorpayPaymentResponse
-}): Promise<void> {
-  const { error } = await supabase.functions.invoke('razorpay', {
+}): Promise<{ shipmentPending: boolean }> {
+  const { data, error } = await supabase.functions.invoke('razorpay', {
     body: {
       action: 'verify-payment',
       orderId,
@@ -175,4 +175,5 @@ export async function verifyRazorpayPayment({
     },
   })
   if (error) await throwFunctionError(error)
+  return { shipmentPending: data?.shipmentPending === true }
 }

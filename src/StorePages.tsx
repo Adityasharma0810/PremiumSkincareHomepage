@@ -9,7 +9,7 @@ import {
 import { useCart } from "@/store/cart-context"
 import { useAuth } from "@/store/auth-context"
 import { createAddress, getAddresses, getCouponByCode, getCustomerOrders } from "@/services/orders"
-import { getDtdcTracking, type DtdcTrackingResponse } from "@/services/dtdc"
+import { getShiprocketTracking, type ShiprocketTrackingResponse } from "@/services/shiprocket"
 import { adaptCatalogProduct, adaptProduct } from "@/lib/product-adapter"
 import { resolveProductImageUrl } from "@/lib/product-images"
 import { getAverageRating } from "@/services/reviews"
@@ -53,7 +53,7 @@ function formatShipmentTime(timestamp?: string | null) {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString("en-IN")
 }
 
-function latestTrackingEvent(events: DtdcTrackingResponse["events"]) {
+function latestTrackingEvent(events: ShiprocketTrackingResponse["events"]) {
   return events.reduce<(typeof events)[number] | null>((latest, event) => {
     if (!event.event_time) return latest
     return !latest || !latest.event_time || event.event_time > latest.event_time
@@ -72,7 +72,7 @@ type OrderTimelineStage = {
   time: string | null
 }
 
-function getOrderTimeline(order: CustomerOrder, tracking?: DtdcTrackingResponse): OrderTimelineStage[] {
+function getOrderTimeline(order: CustomerOrder, tracking?: ShiprocketTrackingResponse): OrderTimelineStage[] {
   const stages = [
     { label: "Order placed", matches: /order.{0,8}(placed|confirmed)|created/ },
     { label: "Packed", matches: /pack(ed|ing)?|ready for dispatch/ },
@@ -181,7 +181,7 @@ export function OrdersPage({ userId }: { userId: string | null }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [retry, setRetry] = useState(0)
-  const [trackingByOrder, setTrackingByOrder] = useState<Record<string, DtdcTrackingResponse>>({})
+  const [trackingByOrder, setTrackingByOrder] = useState<Record<string, ShiprocketTrackingResponse>>({})
   const [trackingLoading, setTrackingLoading] = useState<Record<string, boolean>>({})
   const [trackingErrors, setTrackingErrors] = useState<Record<string, string>>({})
   const [expandedOrders, setExpandedOrders] = useState<Record<string, boolean>>({})
@@ -190,10 +190,10 @@ export function OrdersPage({ userId }: { userId: string | null }) {
     setTrackingLoading((current) => ({ ...current, [orderId]: true }))
     setTrackingErrors((current) => ({ ...current, [orderId]: "" }))
     try {
-      const tracking = await getDtdcTracking(orderId)
+      const tracking = await getShiprocketTracking(orderId)
       setTrackingByOrder((current) => ({ ...current, [orderId]: tracking }))
     } catch (cause) {
-      console.error("Could not load DTDC tracking", cause)
+      console.error("Could not load Shiprocket tracking", cause)
       setTrackingErrors((current) => ({
         ...current,
         [orderId]: cause instanceof Error ? cause.message : "Tracking is temporarily unavailable.",

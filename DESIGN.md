@@ -93,12 +93,14 @@ Deep brown is used for text on beige where the specified ivory/beige pairing wou
   COD orders remain payment-pending until cash collection is recorded.
 - Checkout collects a delivery address and stores it in the existing `addresses`
   and `orders.shipping_address_snapshot` fields. A successful payment creates a
-  DTDC shipment record. Once the DTDC API key, customer code, sender address,
-  hub, service, route-node, and package configuration are set as Edge Function
-  secrets, the function automatically books the shipment; until then it remains pending.
-  Package measurements are the fully packed outer dimensions and weight.
-  Customers can request tracking for booked shipments from My orders.
-- `supabase/functions/.env.example` lists local server-side Razorpay and DTDC
+  Shiprocket shipment record. Once Shiprocket API-user credentials, pickup
+  location, pickup PIN code, and packed parcel dimensions/weight are set as
+  Edge Function secrets, the function creates the order, selects the lowest-rate
+  serviceable courier, assigns its AWB, and requests a pickup. Shipments remain
+  pending when configuration or booking is incomplete. Customers can request
+  tracking for booked shipments from My orders. Existing DTDC shipments are not
+  converted to Shiprocket shipments.
+- `supabase/functions/.env.example` lists local server-side Razorpay and Shiprocket
   placeholders. Never put these credentials in the Vite `.env`; configure deployed
   Edge Function secrets in Supabase.
 - Deploy `supabase/functions/razorpay` to the linked Supabase project and set
@@ -109,6 +111,6 @@ Deep brown is used for text on beige where the specified ivory/beige pairing wou
   The function verifies the Supabase access token itself, so its gateway JWT
   verification is disabled in `supabase/config.toml`. COD orders are created
   as confirmed with pending payment and request cash collection on delivery.
-  DTDC booking requests carry the full order total as the COD amount.
+  Shiprocket COD orders are created with the full order total payable on delivery.
 - The account icon and mobile navigation open the sign-in/account page.
 - Backend authentication and server-enforced checkout authorization remain deferred.

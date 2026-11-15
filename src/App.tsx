@@ -254,7 +254,7 @@ export default function App() {
         const messages = ["Your COD order is placed. Please pay the courier when it arrives."]
         if (!result.cartCleared) messages.push("Your bag could not be cleared; please don’t place the same order again.")
         if (cartRefreshFailed) messages.push("The bag view may need a refresh.")
-        if (result.shipmentPending) messages.push("Courier setup is still pending.")
+        if (result.shipmentPending) messages.push("Shiprocket shipment setup or pickup booking is still pending.")
         setNotice(messages.join(" "))
         navigate("orders")
         return
@@ -272,10 +272,12 @@ export default function App() {
           email: user.email ?? undefined,
         },
       })
-      await verifyRazorpayPayment({ orderId: order.orderId, cartId, payment })
+      const result = await verifyRazorpayPayment({ orderId: order.orderId, cartId, payment })
       await refreshCart()
       setCoupon(null)
-      setNotice("Payment successful. Your order is confirmed; DTDC shipment is pending setup.")
+      setNotice(result.shipmentPending
+        ? "Payment successful. Your order is confirmed; Shiprocket shipment setup is still pending."
+        : "Payment successful. Your order is confirmed and the Shiprocket shipment is booked.")
     } catch (err) {
       console.error("Checkout failed", err)
       setNotice(err instanceof Error ? err.message : "Checkout could not be completed. Please try again.")

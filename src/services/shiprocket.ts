@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 
-export interface DtdcTrackingEvent {
+export interface ShiprocketTrackingEvent {
   type?: string
   event_time?: number
   hub_name?: string | null
@@ -8,18 +8,17 @@ export interface DtdcTrackingEvent {
   failure_reason?: string | null
 }
 
-export interface DtdcTrackingResponse {
+export interface ShiprocketTrackingResponse {
   reference_number: string
   status: string
-  creation_date?: number
-  events: DtdcTrackingEvent[]
+  events: ShiprocketTrackingEvent[]
 }
 
-export async function getDtdcTracking(orderId: string): Promise<DtdcTrackingResponse> {
+export async function getShiprocketTracking(orderId: string): Promise<ShiprocketTrackingResponse> {
   const { data, error } = await supabase.functions.invoke('razorpay', {
     body: { action: 'track-shipment', orderId },
   })
 
   if (error) throw error
-  return data as DtdcTrackingResponse
+  return data as ShiprocketTrackingResponse
 }

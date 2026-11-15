@@ -49,24 +49,6 @@ function razorpayAuthorization() {
   return `Basic ${btoa(credentials)}`
 }
 
-type DtdcRouteNode = {
-  courier_partner: string
-  courier_accounts: string
-  mode: 'shipment' | 'bag'
-  node_type: 'FM' | 'MM' | 'LM'
-}
-
-function isDtdcRouteNode(value: unknown): value is DtdcRouteNode {
-  if (!value || typeof value !== 'object') return false
-  const node = value as Record<string, unknown>
-  return typeof node.courier_partner === 'string' &&
-    !!node.courier_partner.trim() &&
-    typeof node.courier_accounts === 'string' &&
-    !!node.courier_accounts.trim() &&
-    (node.mode === 'shipment' || node.mode === 'bag') &&
-    (node.node_type === 'FM' || node.node_type === 'MM' || node.node_type === 'LM')
-}
-
 function positiveNumber(name: string): number | null {
   const raw = Deno.env.get(name)?.trim()
   if (!raw) return null
@@ -74,67 +56,112 @@ function positiveNumber(name: string): number | null {
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
-function dtdcConfiguration() {
+const SHIPROCKET_API = 'https://apiv2.shiprocket.in/v1/external'
+
+function shiprocketConfiguration() {
   const names = [
-    'DTDC_API_KEY',
-    'DTDC_CUSTOMER_CODE',
-    'DTDC_SERVICE_TYPE_ID',
-    'DTDC_HUB_CODE',
-    'DTDC_SENDER_NAME',
-    'DTDC_SENDER_PHONE',
-    'DTDC_SENDER_ADDRESS_LINE1',
-    'DTDC_SENDER_CITY',
-    'DTDC_SENDER_STATE',
-    'DTDC_SENDER_PINCODE',
+    'SHIPROCKET_EMAIL',
+    'SHIPROCKET_PASSWORD',
+    'SHIPROCKET_PICKUP_LOCATION',
+    'SHIPROCKET_PICKUP_PINCODE',
   ]
   const missing = names.filter((name) => !Deno.env.get(name)?.trim())
-  const weight = positiveNumber('DTDC_PARCEL_WEIGHT_KG')
-  const length = positiveNumber('DTDC_PARCEL_LENGTH_CM')
-  const width = positiveNumber('DTDC_PARCEL_WIDTH_CM')
-  const height = positiveNumber('DTDC_PARCEL_HEIGHT_CM')
-  if (weight === null) missing.push('DTDC_PARCEL_WEIGHT_KG')
-  if (length === null) missing.push('DTDC_PARCEL_LENGTH_CM')
-  if (width === null) missing.push('DTDC_PARCEL_WIDTH_CM')
-  if (height === null) missing.push('DTDC_PARCEL_HEIGHT_CM')
-
-  let routeNodes: DtdcRouteNode[] = []
-  const rawNodes = Deno.env.get('DTDC_ROUTE_NODES_JSON')?.trim()
-  if (!rawNodes) {
-    missing.push('DTDC_ROUTE_NODES_JSON')
-  } else {
-    try {
-      const parsed: unknown = JSON.parse(rawNodes)
-      if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(isDtdcRouteNode)) {
-        missing.push('DTDC_ROUTE_NODES_JSON')
-      } else {
-        routeNodes = parsed
-      }
-    } catch {
-      missing.push('DTDC_ROUTE_NODES_JSON')
-    }
+  const weight = positiveNumber('SHIPROCKET_PARCEL_WEIGHT_KG')
+  const length = positiveNumber('SHIPROCKET_PARCEL_LENGTH_CM')
+  const breadth = positiveNumber('SHIPROCKET_PARCEL_WIDTH_CM')
+  const height = positiveNumber('SHIPROCKET_PARCEL_HEIGHT_CM')
+  if (!/^\d{6}$/.test(Deno.env.get('SHIPROCKET_PICKUP_PINCODE')?.trim() || '')) {
+    missing.push('SHIPROCKET_PICKUP_PINCODE')
   }
-
-  return {
-    missing: [...new Set(missing)],
-    routeNodes,
-    weight,
-    length,
-    width,
-    height,
-  }
+  if (weight === null) missing.push('SHIPROCKET_PARCEL_WEIGHT_KG')
+  if (length === null) missing.push('SHIPROCKET_PARCEL_LENGTH_CM')
+  if (breadth === null) missing.push('SHIPROCKET_PARCEL_WIDTH_CM')
+  if (height === null) missing.push('SHIPROCKET_PARCEL_HEIGHT_CM')
+  return { missing: [...new Set(missing)], weight, length, breadth, height }
 }
 
-async function bookDtdcShipment(
+async function getShiprocketToken(): Promise<string> {
+  const response = await fetch(`${SHIPROCKET_API}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: requiredEnv('SHIPROCKET_EMAIL'),
+      password: requiredEnv('SHIPROCKET_PASSWORD'),
+    }),
+  })
+  const result = await response.json() as Record<string, unknown>
+  if (!response.ok || typeof result.token !== 'string') {
+    console.error(`Shiprocket authentication failed (HTTP ${response.status}).`)
+    throw new Error('Shiprocket authentication failed. Check the API user credentials.')
+  }
+  return result.token
+}
+
+function shiprocketMessage(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(shiprocketMessage).filter(Boolean).join(', ')
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>)
+      .map(shiprocketMessage)
+      .filter(Boolean)
+      .join(', ')
+  }
+  return ''
+}
+
+async function shiprocketRequest(
+  token: string,
+  path: string,
+  method = 'GET',
+  body?: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(`${SHIPROCKET_API}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  const responseText = await response.text()
+  let result: Record<string, unknown>
+  try {
+    result = JSON.parse(responseText) as Record<string, unknown>
+  } catch {
+    result = { message: 'Shiprocket returned an unreadable response.' }
+  }
+  if (!response.ok) {
+    console.error(`Shiprocket API request failed (HTTP ${response.status}, ${path}).`)
+    const message = typeof result.message === 'string'
+      ? result.message
+      : shiprocketMessage(result.errors) || 'Shiprocket request failed.'
+    throw new Error(message)
+  }
+  return result
+}
+
+async function bookShiprocketShipment(
   admin: ReturnType<typeof createClient>,
   shipmentId: string,
   order: {
     order_number: string
     total_amount: number
     shipping_address_snapshot: Record<string, unknown> | null
+    customer_name: string
+    customer_email: string
+    customer_phone: string
   },
+  items: Array<{
+    product_name: string
+    variant_name: string | null
+    sku: string | null
+    quantity: number
+    unit_price: number
+    variant_id?: string
+  }>,
   isCod = false,
-) {
-  const configuration = dtdcConfiguration()
+): Promise<boolean> {
+  const configuration = shiprocketConfiguration()
   if (configuration.missing.length) {
     const { error } = await admin
       .from('shipments')
@@ -145,156 +172,155 @@ async function bookDtdcShipment(
         },
       })
       .eq('id', shipmentId)
-    if (error) console.error('Could not update pending DTDC shipment configuration status.')
-    return
+    if (error) console.error('Could not update pending Shiprocket shipment configuration status.')
+    return true
   }
 
   const address = order.shipping_address_snapshot
   if (!address) {
-    console.error('Cannot create DTDC shipment without the order shipping address.')
-    return
+    console.error('Cannot create Shiprocket shipment without the order shipping address.')
+    return true
   }
 
-  const declaredValue = String(Math.round(Number(order.total_amount)))
-  const piece = {
-    description: 'Skincare products',
-    declared_value: declaredValue,
-    weight: String(configuration.weight),
-    height: String(configuration.height),
-    length: String(configuration.length),
-    width: String(configuration.width),
-    weight_unit: 'kg',
-    dimension_unit: 'cm',
-  }
+  const [firstName, ...lastNameParts] = order.customer_name.trim().split(/\s+/)
+  const addressLine2 = [address.address_line2, address.landmark].filter(Boolean).join(', ')
   const requestPayload = {
-    action_type: 'delivery',
-    consignment_type: 'forward',
-    movement_type: 'forward',
-    load_type: 'NON-DOCUMENT',
-    description: 'derma aura skincare order',
-    customer_code: Deno.env.get('DTDC_CUSTOMER_CODE')?.trim() || undefined,
-    reference_number: order.order_number,
-    customer_reference_number: order.order_number,
-    service_type_id: Deno.env.get('DTDC_SERVICE_TYPE_ID')!.trim(),
-    dimension_unit: 'cm',
-    length: String(configuration.length),
-    width: String(configuration.width),
-    height: String(configuration.height),
-    weight_unit: 'kg',
-    weight: String(configuration.weight),
-    cod_collection_mode: isCod ? 'cash' : undefined,
-    cod_amount: isCod ? String(Number(order.total_amount)) : '0',
-    invoice_amount: String(Number(order.total_amount)),
-    declared_value: Math.round(Number(order.total_amount)),
-    num_pieces: 1,
-    is_risk_surcharge_applicable: false,
-    hub_code: Deno.env.get('DTDC_HUB_CODE')!.trim(),
-    origin_details: {
-      name: Deno.env.get('DTDC_SENDER_NAME')!.trim(),
-      phone: Deno.env.get('DTDC_SENDER_PHONE')!.trim(),
-      address_line_1: Deno.env.get('DTDC_SENDER_ADDRESS_LINE1')!.trim(),
-      address_line_2: Deno.env.get('DTDC_SENDER_ADDRESS_LINE2')?.trim() || undefined,
-      pincode: Deno.env.get('DTDC_SENDER_PINCODE')!.trim(),
-      city: Deno.env.get('DTDC_SENDER_CITY')!.trim(),
-      state: Deno.env.get('DTDC_SENDER_STATE')!.trim(),
-      country: Deno.env.get('DTDC_SENDER_COUNTRY')?.trim() || 'India',
-    },
-    destination_details: {
-      name: address.recipient_name,
-      phone: address.phone,
-      address_line_1: address.address_line1,
-      address_line_2: address.address_line2 || undefined,
-      pincode: address.pincode,
-      city: address.city,
-      state: address.state,
-      country: address.country || 'India',
-    },
-    nodes: configuration.routeNodes.map((node) => ({
-      ...node,
-      declared_value: declaredValue,
+    order_id: order.order_number,
+    order_date: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    pickup_location: Deno.env.get('SHIPROCKET_PICKUP_LOCATION')!.trim(),
+    comment: 'derma aura skincare order',
+    billing_customer_name: firstName || order.customer_name,
+    billing_last_name: lastNameParts.join(' '),
+    billing_address: address.address_line1,
+    billing_address_2: addressLine2,
+    billing_city: address.city,
+    billing_pincode: address.pincode,
+    billing_state: address.state,
+    billing_country: address.country || 'India',
+    billing_email: order.customer_email,
+    billing_phone: order.customer_phone,
+    shipping_is_billing: true,
+    order_items: items.map((item) => ({
+      name: item.variant_name ? `${item.product_name} - ${item.variant_name}` : item.product_name,
+      sku: item.sku || item.variant_id || item.product_name,
+      units: item.quantity,
+      selling_price: Number(item.unit_price),
+      discount: 0,
+      tax: 0,
+      hsn: '',
     })),
-    pieces_detail: [piece],
+    payment_method: isCod ? 'COD' : 'Prepaid',
+    shipping_charges: 0,
+    giftwrap_charges: 0,
+    transaction_charges: 0,
+    total_discount: Math.max(
+      0,
+      items.reduce((sum, item) => sum + Number(item.unit_price) * item.quantity, 0) -
+        Number(order.total_amount),
+    ),
+    sub_total: items.reduce((sum, item) => sum + Number(item.unit_price) * item.quantity, 0),
+    length: configuration.length,
+    breadth: configuration.breadth,
+    height: configuration.height,
+    weight: configuration.weight,
   }
 
+  let shiprocketOrderId: number | null = null
+  let shipmentIdFromProvider: number | null = null
   try {
-    const response = await fetch(
-      'https://app.shipsy.in/api/customer/integration/consignment/upload/softdata/v2',
-      {
-        method: 'POST',
-        headers: {
-          'api-key': Deno.env.get('DTDC_API_KEY')!.trim(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestPayload),
-      },
+    const token = await getShiprocketToken()
+    const created = await shiprocketRequest(token, '/orders/create/adhoc', 'POST', requestPayload)
+    shipmentIdFromProvider = Number(created.shipment_id)
+    shiprocketOrderId = Number(created.order_id)
+    if (!Number.isFinite(shipmentIdFromProvider) || shipmentIdFromProvider <= 0) {
+      throw new Error(shiprocketMessage(created.message) || 'Shiprocket did not return a shipment ID.')
+    }
+
+    const serviceabilityQuery = new URLSearchParams({
+      pickup_postcode: Deno.env.get('SHIPROCKET_PICKUP_PINCODE')!.trim(),
+      delivery_postcode: String(address.pincode || ''),
+      weight: String(configuration.weight),
+      cod: isCod ? '1' : '0',
+    })
+    const serviceability = await shiprocketRequest(
+      token,
+      `/courier/serviceability/?${serviceabilityQuery.toString()}`,
     )
-    const responseText = await response.text()
-    let responsePayload: Record<string, unknown>
+    const data = serviceability.data as Record<string, unknown> | undefined
+    const couriers = Array.isArray(data?.available_courier_companies)
+      ? data.available_courier_companies as Array<Record<string, unknown>>
+      : []
+    const courier = couriers
+      .filter((option) => Number.isFinite(Number(option.courier_company_id)))
+      .sort((a, b) => Number(a.freight_charge ?? Number.MAX_VALUE) - Number(b.freight_charge ?? Number.MAX_VALUE))[0]
+    if (!courier) {
+      throw new Error('Shiprocket has no courier available for this pickup and delivery PIN code.')
+    }
+
+    const assigned = await shiprocketRequest(token, '/courier/assign/awb', 'POST', {
+      shipment_id: shipmentIdFromProvider,
+      courier_id: Number(courier.courier_company_id),
+    })
+    const assignedData = assigned.response as Record<string, unknown> | undefined
+    const awbCode = typeof assignedData?.data === 'object' && assignedData.data
+      ? (assignedData.data as Record<string, unknown>).awb_code
+      : assigned.awb_code
+    if (typeof awbCode !== 'string' || !awbCode.trim()) {
+      throw new Error(shiprocketMessage(assigned.message) || 'Shiprocket did not assign an AWB number.')
+    }
+
+    let pickupPending = false
+    let pickupMessage = ''
     try {
-      responsePayload = JSON.parse(responseText)
-    } catch {
-      responsePayload = { message: 'DTDC returned an unreadable response.' }
+      await shiprocketRequest(token, '/courier/generate/pickup', 'POST', {
+        shipment_id: [shipmentIdFromProvider],
+      })
+    } catch (error) {
+      pickupPending = true
+      pickupMessage = error instanceof Error ? error.message : 'Pickup could not be scheduled.'
+      console.error('Shiprocket assigned an AWB but pickup scheduling failed.')
     }
 
-    if (!response.ok || responsePayload.success !== true) {
-      const { error } = await admin
-        .from('shipments')
-        .update({
-          status: 'exception',
-          request_payload: requestPayload,
-          response_payload: { booking_status: 'failed', provider: responsePayload },
-        })
-        .eq('id', shipmentId)
-      if (error) console.error('Could not save DTDC booking failure to the shipment record.')
-      console.error(`DTDC booking was not confirmed (HTTP ${response.status}).`)
-      return
+    const courierName = typeof courier.courier_name === 'string' ? courier.courier_name : 'Shiprocket courier'
+    const responsePayload = {
+      booking_status: 'booked',
+      shiprocket_order_id: Number.isFinite(shiprocketOrderId) ? shiprocketOrderId : null,
+      shiprocket_shipment_id: shipmentIdFromProvider,
+      courier_name: courierName,
+      pickup_status: pickupPending ? 'pending' : 'scheduled',
+      ...(pickupMessage ? { pickup_message: pickupMessage } : {}),
     }
-
-    const consignmentNumber = typeof responsePayload.reference_number === 'string'
-      ? responsePayload.reference_number
-      : ''
-    if (!consignmentNumber) {
-      const { error } = await admin
-        .from('shipments')
-        .update({
-          status: 'exception',
-          request_payload: requestPayload,
-          response_payload: { booking_status: 'missing_reference', provider: responsePayload },
-        })
-        .eq('id', shipmentId)
-      if (error) console.error('Could not save DTDC booking response to the shipment record.')
-      console.error('DTDC reported success without a consignment reference.')
-      return
-    }
-
     const { error } = await admin
       .from('shipments')
       .update({
         status: 'booked',
-        consignment_number: consignmentNumber,
-        awb_number: typeof responsePayload.courier_partner_reference_number === 'string'
-          ? responsePayload.courier_partner_reference_number
-          : consignmentNumber,
-        courier_service: typeof responsePayload.courier_partner === 'string'
-          ? responsePayload.courier_partner
-          : 'DTDC',
+        consignment_number: String(shipmentIdFromProvider),
+        awb_number: awbCode.trim(),
+        courier_service: courierName,
         booked_at: new Date().toISOString(),
         request_payload: requestPayload,
         response_payload: responsePayload,
       })
       .eq('id', shipmentId)
-    if (error) console.error('Could not save successful DTDC booking to the shipment record.')
+    if (error) console.error('Could not save successful Shiprocket booking to the shipment record.')
+    return pickupPending || !!error
   } catch (error) {
-    console.error('DTDC shipment booking request failed:', error)
+    console.error('Shiprocket shipment booking request failed:', error)
     const { error: updateError } = await admin
       .from('shipments')
       .update({
         status: 'exception',
         request_payload: requestPayload,
-        response_payload: { booking_status: 'request_failed' },
+        response_payload: {
+          booking_status: 'failed',
+          shiprocket_order_id: Number.isFinite(shiprocketOrderId) ? shiprocketOrderId : null,
+          shiprocket_shipment_id: Number.isFinite(shipmentIdFromProvider) ? shipmentIdFromProvider : null,
+          error: error instanceof Error ? error.message : 'Shiprocket booking failed.',
+        },
       })
       .eq('id', shipmentId)
-    if (updateError) console.error('Could not save DTDC request failure to the shipment record.')
+    if (updateError) console.error('Could not save Shiprocket request failure to the shipment record.')
+    return true
   }
 }
 
@@ -618,8 +644,8 @@ async function createOrder(
       .from('shipments')
       .insert({
         order_id: order.id,
-        provider: 'dtdc',
-        courier_service: 'DTDC',
+        provider: 'shiprocket',
+        courier_service: 'Shiprocket',
         status: 'pending',
         request_payload: {
           destination: shippingAddress,
@@ -629,14 +655,25 @@ async function createOrder(
       })
       .select('id')
       .single()
+    let shipmentPending = !!shipmentError
     if (shipmentError) {
-      console.error('COD order was created, but its DTDC shipment record could not be created.')
+      console.error('COD order was created, but its Shiprocket shipment record could not be created.')
     } else {
-      await bookDtdcShipment(admin, shipment.id, {
+      shipmentPending = await bookShiprocketShipment(admin, shipment.id, {
         order_number: order.order_number,
         total_amount: totalAmount,
         shipping_address_snapshot: shippingAddress,
-      }, true)
+        customer_name: shippingAddress.recipient_name,
+        customer_email: user.email ?? '',
+        customer_phone: shippingAddress.phone,
+      }, items.map((item) => ({
+        product_name: item.variant!.product!.name,
+        variant_name: item.variant!.variant_name,
+        sku: item.variant!.sku,
+        quantity: item.quantity,
+        unit_price: Number(item.variant!.price),
+        variant_id: item.variant!.id,
+      })), true)
     }
 
     const { error: clearCartError } = await admin
@@ -649,7 +686,7 @@ async function createOrder(
       success: true,
       orderId: order.id,
       cartCleared: !clearCartError,
-      shipmentPending: !!shipmentError,
+      shipmentPending,
     })
   }
 
@@ -720,7 +757,7 @@ async function verifyPayment(request: Request, body: Record<string, unknown>) {
 
   const { data: order, error: orderLookupError } = await admin
     .from('orders')
-    .select('order_number, total_amount, coupon_id, discount_amount, shipping_address_snapshot')
+    .select('order_number, total_amount, coupon_id, discount_amount, shipping_address_snapshot, customer_name, customer_email, customer_phone')
     .eq('id', orderId)
     .eq('user_id', user.id)
     .single()
@@ -842,17 +879,25 @@ async function verifyPayment(request: Request, body: Record<string, unknown>) {
 
   const { data: existingShipment, error: shipmentLookupError } = await admin
     .from('shipments')
-    .select('id')
+    .select('id, status, response_payload')
     .eq('order_id', orderId)
     .maybeSingle()
   if (shipmentLookupError) throw shipmentLookupError
+  let shipmentPending = existingShipment
+    ? existingShipment.status !== 'booked' || existingShipment.response_payload?.pickup_status === 'pending'
+    : false
   if (!existingShipment) {
+    const { data: shipmentItems, error: shipmentItemsError } = await admin
+      .from('order_items')
+      .select('product_name, variant_name, sku, quantity, unit_price, variant_id')
+      .eq('order_id', orderId)
+    if (shipmentItemsError) throw shipmentItemsError
     const { data: shipment, error: shipmentError } = await admin
       .from('shipments')
       .insert({
         order_id: orderId,
-        provider: 'dtdc',
-        courier_service: 'DTDC',
+        provider: 'shiprocket',
+        courier_service: 'Shiprocket',
         status: 'pending',
         request_payload: {
           destination: order.shipping_address_snapshot,
@@ -863,7 +908,7 @@ async function verifyPayment(request: Request, body: Record<string, unknown>) {
       .select('id')
       .single()
     if (shipmentError) throw shipmentError
-    await bookDtdcShipment(admin, shipment.id, order)
+    shipmentPending = await bookShiprocketShipment(admin, shipment.id, order, shipmentItems ?? [])
   }
 
   const { error: clearCartError } = await admin
@@ -872,7 +917,7 @@ async function verifyPayment(request: Request, body: Record<string, unknown>) {
     .eq('cart_id', cartId)
   if (clearCartError) throw clearCartError
 
-  return jsonResponse({ success: true, orderId })
+  return jsonResponse({ success: true, orderId, shipmentPending })
 }
 
 async function trackShipment(request: Request, body: Record<string, unknown>) {
@@ -913,36 +958,52 @@ async function trackShipment(request: Request, body: Record<string, unknown>) {
 
   const { data: shipment, error: shipmentError } = await admin
     .from('shipments')
-    .select('consignment_number, awb_number')
+    .select('provider, consignment_number, awb_number')
     .eq('order_id', orderId)
     .maybeSingle()
   if (shipmentError) throw shipmentError
-  const referenceNumber = shipment?.consignment_number || shipment?.awb_number
+  if (shipment?.provider !== 'shiprocket') {
+    return jsonResponse({ error: 'Tracking is only available for Shiprocket shipments.' }, 409)
+  }
+  const referenceNumber = shipment?.awb_number || shipment?.consignment_number
   if (!referenceNumber) {
-    return jsonResponse({ error: 'DTDC tracking is not available until this order has a consignment number.' }, 409)
+    return jsonResponse({ error: 'Shiprocket tracking is not available until an AWB is assigned.' }, 409)
   }
 
-  const trackingUrl = new URL(
-    'https://app.shipsy.in/api/customer/integration/consignment/trackto',
+  const token = await getShiprocketToken()
+  const tracking = await shiprocketRequest(
+    token,
+    `/courier/track/awb/${encodeURIComponent(referenceNumber)}`,
   )
-  trackingUrl.searchParams.set('reference_number', referenceNumber)
-  const response = await fetch(trackingUrl, {
-    headers: { 'api-key': requiredEnv('DTDC_API_KEY') },
+  const trackingData = tracking.tracking_data as Record<string, unknown> | undefined
+  const trackDetails = Array.isArray(trackingData?.shipment_track)
+    ? trackingData.shipment_track[0] as Record<string, unknown> | undefined
+    : undefined
+  const rawEvents = Array.isArray(trackingData?.shipment_track_activities)
+    ? trackingData.shipment_track_activities
+    : Array.isArray(trackDetails?.shipment_track_activities)
+      ? trackDetails.shipment_track_activities
+      : []
+  const events = rawEvents.map((rawEvent) => {
+    const event = rawEvent as Record<string, unknown>
+    const date = typeof event.date === 'string' ? event.date : ''
+    const spacedDate = date.match(/^(\d{2}) (\d{2}) (\d{4})(.*)$/)
+    const parsedDate = spacedDate
+      ? Date.parse(`${spacedDate[2]}/${spacedDate[1]}/${spacedDate[3]}${spacedDate[4]}`)
+      : Date.parse(date)
+    return {
+      type: String(event.status ?? event['sr-status-label'] ?? ''),
+      event_time: Number.isFinite(parsedDate) ? Math.floor(parsedDate / 1000) : undefined,
+      hub_name: typeof event.location === 'string' ? event.location : null,
+      customer_update: typeof event.activity === 'string' ? event.activity : null,
+      failure_reason: null,
+    }
   })
-  if (!response.ok) {
-    console.error(`DTDC tracking request failed (HTTP ${response.status}).`)
-    return jsonResponse({ error: 'Could not retrieve tracking from DTDC right now.' }, 502)
-  }
-
-  const tracking = await response.json() as Record<string, unknown>
-  if (
-    typeof tracking.status !== 'string' ||
-    !Array.isArray(tracking.events)
-  ) {
-    console.error('DTDC tracking returned an unexpected response shape.')
-    return jsonResponse({ error: 'DTDC returned an unexpected tracking response.' }, 502)
-  }
-  return jsonResponse(tracking)
+  const status = trackDetails?.current_status ??
+    trackDetails?.shipment_status ??
+    trackingData?.shipment_status ??
+    'Shipment booked'
+  return jsonResponse({ reference_number: referenceNumber, status: String(status), events })
 }
 
 async function getCustomerOrders(request: Request) {
